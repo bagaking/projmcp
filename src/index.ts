@@ -47,10 +47,8 @@ process.on('unhandledRejection', (reason, promise) => {
   process.exit(1);
 });
 
-// Start the application if this file is run directly
-if (import.meta.url === `file://${process.argv[1]}`) {
-  bootstrap().catch((error) => {
-    console.error('💥 Bootstrap failed:', error);
-    process.exit(1);
-  });
-}
+// Start the application
+bootstrap().catch((error) => {
+  console.error('💥 Bootstrap failed:', error);
+  process.exit(1);
+});

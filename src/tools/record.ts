@@ -1,43 +1,73 @@
 import { z } from 'zod';
-import { FileManager } from '../utils/file-manager.js';
-import { TemplateGenerator } from '../utils/template-generator.js';
+import { ITool, IToolResponse, IFileManager, ITemplateGenerator } from '../interfaces/core-interfaces.js';
+import { getRightNowTime } from '../utils/time-helper.js';
 
-export const RecordSchema = z.object({
-  type: z.enum(['doc', 'code', 'opinion']),
-  target: z.string().min(1),
-  content: z.string().min(1)
-});
+// Schema is now defined inline within the tool class
 
-export type RecordArgs = z.infer<typeof RecordSchema>;
+export class RecordTool implements ITool {
+  readonly name = 'record';
+  readonly description = 'Record structured documentation with proper categorization';
+  readonly inputSchema = {
+    type: z.enum(['doc', 'code', 'opinion']).describe('Type of document to record'),
+    target: z.string().min(1).describe('Target identifier for the document'),
+    content: z.string().min(1).describe('Content to record')
+  };
 
-export class RecordTool {
   constructor(
-    private fileManager: FileManager,
-    private templateGenerator: TemplateGenerator
+    private readonly fileManager: IFileManager,
+    private readonly templateGenerator: ITemplateGenerator
   ) {}
 
-  async execute(args: RecordArgs) {
-    const fileName = await this.fileManager.generateFileName(args.type, args.target);
-    
-    // Generate appropriate template
-    const templateType = args.type === 'doc' ? 'docref' : 
-      args.type === 'code' ? 'coderef' : 'opinions';
-    const template = this.templateGenerator.generateTemplate(templateType, {
-      target: args.target,
-      topic: args.target,
-      date: new Date().toISOString().split('T')[0]
-    });
+  async execute(args: Record<string, unknown>): Promise<IToolResponse> {
+    try {
+      const rightNow = getRightNowTime();
+      
+      // Validate arguments using the same schema
+      const validatedArgs = z.object(this.inputSchema).parse(args);
+      const fileName = await this.fileManager.generateFileName(validatedArgs.type, validatedArgs.target);
+      
+      // Generate appropriate template
+      const templateType = validatedArgs.type === 'doc' ? 'docref' : 
+        validatedArgs.type === 'code' ? 'coderef' : 'opinions';
+      const template = this.templateGenerator.generateTemplate(templateType, {
+        target: validatedArgs.target,
+        topic: validatedArgs.target,
+        date: new Date().toISOString().split('T')[0]
+      });
 
-    // Combine template with user content
-    const fullContent = `${template}\n\n## User Content\n\n${args.content}`;
-    
-    await this.fileManager.writeFile(fileName, fullContent);
-    
-    return {
-      content: [{
-        type: 'text' as const,
-        text: `Document recorded successfully as ${fileName}\n\n${fullContent}`
-      }]
-    };
+      // Combine template with user content
+      const fullContent = `${template}\n\n## User Content\n\n${validatedArgs.content}`;
+      
+      await this.fileManager.writeFile(fileName, fullContent);
+      
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `Document recorded successfully as ${fileName}\n\n${fullContent}`
+        }],
+        _meta: {
+          tool: this.name,
+          file_name: fileName,
+          content_type: validatedArgs.type,
+          right_now: rightNow
+        }
+      };
+      
+    } catch (error) {
+      const rightNow = getRightNowTime();
+      
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `Error recording document: ${error instanceof Error ? error.message : 'Unknown error'}`
+        }],
+        isError: true,
+        _meta: {
+          tool: this.name,
+          error_type: error instanceof Error ? error.constructor.name : 'UnknownError',
+          right_now: rightNow
+        }
+      };
+    }
   }
 }

@@ -5,14 +5,19 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { z } from 'zod';
 
 import { IFileManager, ITemplateGenerator, ILogger, ITool } from '../interfaces/core-interfaces.js';
-import { ToolRegistry } from './tool-registry.js';
 import { LoggerFactory, LoggerUtils } from './logger.js';
 
 // Tool implementations
 import { ListFilesTool } from '../tools/list-files.js';
-// We'll add more tools as we convert them
+import { ShowCurrentTool } from '../tools/show-current.js';
+import { ShowPlanTool } from '../tools/show-plan.js';
+import { InitProjectTool } from '../tools/init-project.js';
+import { RecordTool } from '../tools/record.js';
+import { QuerySprintTool } from '../tools/query-sprint.js';
+import { RightNowTool } from '../tools/right-now.js';
 
 /**
  * Main MCP server with dependency injection and modular architecture
@@ -20,8 +25,8 @@ import { ListFilesTool } from '../tools/list-files.js';
  */
 export class ProjectPlanMCPServer {
   private readonly server: McpServer;
-  private readonly toolRegistry: ToolRegistry;
   private readonly logger: ILogger;
+  private readonly tools: ITool[];
   
   constructor(
     private readonly fileManager: IFileManager,
@@ -30,14 +35,24 @@ export class ProjectPlanMCPServer {
     this.logger = LoggerFactory.getLogger();
     this.server = new McpServer({
       name: 'mcp-project-plan-server',
-      version: '1.0.0',
+      version: '0.3.10',
     });
     
-    this.toolRegistry = new ToolRegistry();
+    // Initialize all tool instances
+    this.tools = [
+      new ListFilesTool(this.fileManager),
+      new ShowCurrentTool(this.fileManager),
+      new ShowPlanTool(this.fileManager),
+      new InitProjectTool(this.fileManager, this.templateGenerator),
+      new RecordTool(this.fileManager, this.templateGenerator),
+      new QuerySprintTool(this.fileManager),
+      new RightNowTool(this.fileManager)
+    ];
     
     this.logger.info('ProjectPlanMCPServer initialized', {
       serverName: 'mcp-project-plan-server',
-      version: '1.0.0'
+      version: '0.3.10',
+      toolCount: this.tools.length
     });
     
     this.registerAllTools();
@@ -51,18 +66,16 @@ export class ProjectPlanMCPServer {
     LoggerUtils.logMethodEntry(this.logger, 'ProjectPlanMCPServer', 'start');
 
     try {
-      // Register all tools with the MCP server
-      this.toolRegistry.registerAllToolsWithServer(this.server);
-      
       // Create and connect transport
       const transport = new StdioServerTransport();
       await this.server.connect(transport);
       
-      const registrationSummary = this.toolRegistry.getRegistrationSummary();
+      const toolNames = ['list_files', 'show_current', 'show_plan', 'init_project_plan', 'record', 'query_sprint', 'right_now'];
       
       this.logger.info('MCP Project Plan Server started successfully', {
         projectPlanDir: this.fileManager.getProjectPlanDir(),
-        ...registrationSummary
+        totalTools: toolNames.length,
+        toolNames
       });
       
       // Setup graceful shutdown
@@ -73,7 +86,7 @@ export class ProjectPlanMCPServer {
       // Log startup success to stderr for visibility
       console.error('🚀 MCP Project Plan Server started successfully');
       console.error(`📁 Project plan directory: ${this.fileManager.getProjectPlanDir()}`);
-      console.error(`🔧 Registered ${registrationSummary.totalTools} tools: ${registrationSummary.toolNames.join(', ')}`);
+      console.error(`🔧 Registered ${toolNames.length} tools: ${toolNames.join(', ')}`);
       
     } catch (error) {
       LoggerUtils.logMethodError(this.logger, 'ProjectPlanMCPServer', 'start', error as Error);
@@ -92,46 +105,48 @@ export class ProjectPlanMCPServer {
     projectPlanDir: string;
     startTime: string;
     } {
-    const registrationSummary = this.toolRegistry.getRegistrationSummary();
+    const toolNames = this.tools.map(tool => tool.name);
     
     return {
       isRunning: true,
-      toolCount: registrationSummary.totalTools,
-      toolNames: registrationSummary.toolNames,
+      toolCount: toolNames.length,
+      toolNames,
       projectPlanDir: this.fileManager.getProjectPlanDir(),
       startTime: new Date().toISOString()
     };
   }
 
   /**
-   * Register all available tools with the registry
+   * Register all available tools directly with MCP server (bypassing registry)
    */
   private registerAllTools(): void {
     const startTime = Date.now();
     LoggerUtils.logMethodEntry(this.logger, 'ProjectPlanMCPServer', 'registerAllTools');
 
     try {
-      // Register core tools
-      const tools: ITool[] = [
-        new ListFilesTool(this.fileManager),
-        // TODO: Convert other tools to ITool interface
-        // new ShowStatusTool(this.fileManager),
-        // new RecordTool(this.fileManager, this.templateGenerator),
-        // new InitProjectTool(this.fileManager, this.templateGenerator),
-        // new QuerySprintTool(this.fileManager)
-      ];
-
-      for (const tool of tools) {
-        this.toolRegistry.registerTool(tool);
+      // Register all tools dynamically using their own schemas
+      for (const tool of this.tools) {
+        this.server.registerTool(
+          tool.name,
+          {
+            description: tool.description,
+            inputSchema: tool.inputSchema
+          },
+          async (args) => {
+            return await tool.execute(args);
+          }
+        );
       }
 
-      this.logger.info('All tools registered', { 
-        toolCount: tools.length,
-        toolNames: tools.map(t => t.name)
+      const toolNames = this.tools.map(tool => tool.name);
+      
+      this.logger.info('All tools registered directly with MCP server', { 
+        toolCount: toolNames.length,
+        toolNames
       });
 
       LoggerUtils.logPerformance(this.logger, 'registerAllTools', startTime, { 
-        toolCount: tools.length 
+        toolCount: toolNames.length 
       });
 
     } catch (error) {

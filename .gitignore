@@ -33,6 +33,7 @@ logs
 # IDE files
 .vscode/
 .idea/
+.c*/
 *.swp
 *.swo
 *~

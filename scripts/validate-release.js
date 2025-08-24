@@ -107,8 +107,11 @@ class ReleaseValidator {
     }
 
     // Validate bin entry
-    if (pkg.bin && !existsSync(pkg.bin['mcp-project-plan'])) {
-      this.errors.push(`Binary file not found: ${pkg.bin['mcp-project-plan']}`);
+    if (pkg.bin) {
+      const binPath = typeof pkg.bin === 'string' ? pkg.bin : Object.values(pkg.bin)[0];
+      if (binPath && !existsSync(binPath)) {
+        this.errors.push(`Binary file not found: ${binPath}`);
+      }
     }
   }
 
@@ -125,7 +128,6 @@ class ReleaseValidator {
 
     const distFiles = [
       'dist/index.js',
-      'dist/server.js',
       'dist/utils/file-manager.js',
       'dist/utils/template-generator.js',
       'dist/services/logger.js',

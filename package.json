@@ -1,11 +1,11 @@
 {
   "name": "@bagaking/projmcp",
-  "version": "0.1.0",
+  "version": "0.3.11",
   "description": "MCP server for AI agent project management using best practices methodology",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "mcp-project-plan": "./dist/index.js"
+    "bagaking-projmcp": "./dist/index.js"
   },
   "scripts": {
     "build": "tsc",
@@ -21,7 +21,7 @@
     "publish:current": "npm run build && npm publish",
     "validate-release": "node scripts/validate-release.js",
     "version:patch": "npm version patch --no-git-tag-version",
-    "version:minor": "npm version minor --no-git-tag-version", 
+    "version:minor": "npm version minor --no-git-tag-version",
     "version:major": "npm version major --no-git-tag-version",
     "release:patch": "npm run version:patch && npm run build && npm publish",
     "release:minor": "npm run version:minor && npm run build && npm publish",

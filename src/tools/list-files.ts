@@ -1,35 +1,23 @@
 import { z } from 'zod';
 import { IFileManager, ITool, IToolResponse } from '../interfaces/core-interfaces.js';
+import { getRightNowTime } from '../utils/time-helper.js';
 
-export const ListFilesSchema = z.object({
-  type: z.enum(['all', 'sprint', 'doc', 'code', 'opinion'])
-});
-
-export type ListFilesArgs = z.infer<typeof ListFilesSchema>;
+// Schema is now defined inline within the tool class
 
 export class ListFilesTool implements ITool {
   readonly name = 'list_files';
   readonly description = 'List files in project_plan directory with comprehensive metadata and statistics';
   readonly inputSchema = {
-    type: 'object',
-    properties: {
-      type: {
-        type: 'string',
-        enum: ['all', 'sprint', 'doc', 'code', 'opinion'],
-        description: 'Filter files by type'
-      }
-    },
-    required: ['type'],
-    additionalProperties: false,
-    $schema: 'http://json-schema.org/draft-07/schema#'
+    type: z.enum(['all', 'sprint', 'doc', 'code', 'opinion'])
+      .describe('Filter files by type')
   };
 
   constructor(private fileManager: IFileManager) {}
 
   async execute(args: Record<string, unknown>): Promise<IToolResponse> {
     try {
-      // Validate and parse arguments
-      const parsedArgs = ListFilesSchema.parse(args);
+      // Validate and parse arguments using the same schema
+      const parsedArgs = z.object(this.inputSchema).parse(args);
       
       const files = await this.fileManager.listFiles(parsedArgs.type);
       const status = await this.fileManager.getProjectStatus();
@@ -62,6 +50,8 @@ export class ListFilesTool implements ITool {
         last_updated: new Date().toISOString()
       };
 
+      const rightNow = getRightNowTime();
+      
       return {
         content: [{
           type: 'text' as const,
@@ -70,11 +60,14 @@ export class ListFilesTool implements ITool {
         _meta: {
           tool: this.name,
           execution_time: new Date().toISOString(),
-          file_count: files.length
+          file_count: files.length,
+          right_now: rightNow
         }
       };
 
     } catch (error) {
+      const rightNow = getRightNowTime();
+      
       return {
         content: [{
           type: 'text' as const,
@@ -83,7 +76,8 @@ export class ListFilesTool implements ITool {
         isError: true,
         _meta: {
           tool: this.name,
-          error_type: error instanceof Error ? error.constructor.name : 'UnknownError'
+          error_type: error instanceof Error ? error.constructor.name : 'UnknownError',
+          right_now: rightNow
         }
       };
     }

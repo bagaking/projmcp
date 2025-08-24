@@ -107,7 +107,7 @@ export class ToolRegistry implements IToolRegistry {
             name,
             {
               description: tool.description,
-              inputSchema: tool.inputSchema as any, // Type compatibility with MCP SDK
+              inputSchema: tool.inputSchema
             },
             async (args: Record<string, unknown>) => {
               const executionStartTime = Date.now();

@@ -4,6 +4,7 @@
  */
 
 import { FileInfo, FileType, TemplateType, ProjectStatus } from '../types.js';
+import { z } from 'zod';
 
 /**
  * File management operations interface
@@ -134,8 +135,8 @@ export interface ITool {
   /** Tool description for client display */
   readonly description: string;
   
-  /** Input schema for parameter validation */
-  readonly inputSchema: Record<string, unknown>;
+  /** Input schema for parameter validation (Zod schema object) */
+  readonly inputSchema: z.ZodRawShape;
   
   /**
    * Execute tool with validated parameters
