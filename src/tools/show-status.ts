@@ -8,15 +8,15 @@ export class ShowStatusTool {
       const content = await this.fileManager.readFile('CURRENT.md');
       return {
         content: [{
-          type: "text" as const,
+          type: 'text' as const,
           text: content
         }]
       };
     } catch (error) {
       return {
         content: [{
-          type: "text" as const,
-          text: "CURRENT.md not found. Please run init_project_plan first."
+          type: 'text' as const,
+          text: 'CURRENT.md not found. Please run init_project_plan first.'
         }]
       };
     }
@@ -27,15 +27,15 @@ export class ShowStatusTool {
       const content = await this.fileManager.readFile('PLAN.md');
       return {
         content: [{
-          type: "text" as const,
+          type: 'text' as const,
           text: content
         }]
       };
     } catch (error) {
       return {
         content: [{
-          type: "text" as const,
-          text: "PLAN.md not found. Please run init_project_plan first."
+          type: 'text' as const,
+          text: 'PLAN.md not found. Please run init_project_plan first.'
         }]
       };
     }

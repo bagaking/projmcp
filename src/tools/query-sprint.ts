@@ -21,7 +21,7 @@ export class QuerySprintTool {
       if (!targetFile) {
         return {
           content: [{
-            type: "text" as const,
+            type: 'text' as const,
             text: `Sprint ${args.sprintId} not found. Available sprints:\n${sprintFiles.map((f: any) => f.name).join('\n')}`
           }]
         };
@@ -30,14 +30,14 @@ export class QuerySprintTool {
       const content = await this.fileManager.readFile(targetFile.path || targetFile.name);
       return {
         content: [{
-          type: "text" as const,
+          type: 'text' as const,
           text: content
         }]
       };
     } catch (error) {
       return {
         content: [{
-          type: "text" as const,
+          type: 'text' as const,
           text: `Error querying sprint: ${error instanceof Error ? error.message : 'Unknown error'}`
         }]
       };

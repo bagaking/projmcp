@@ -1,20 +1,34 @@
 /**
  * File management utilities for project plan operations
  * Follows SRP: Single responsibility for file system operations
+ * Implements comprehensive security validation and structured logging
  */
 
 import { promises as fs } from 'fs';
-import { join, resolve, dirname } from 'path';
+import { join, resolve } from 'path';
 import { FileInfo, FileType, FILE_PATTERNS, ProjectStatus } from '../types.js';
+import { IFileManager, ILogger } from '../interfaces/core-interfaces.js';
+import { SecurityValidator, DEFAULT_SECURITY_CONFIG } from './security-validator.js';
+import { LoggerFactory, LoggerUtils } from '../services/logger.js';
 
 /**
  * Core file manager class following best practices
+ * Implements IFileManager interface with comprehensive security and logging
  */
-export class FileManager {
+export class FileManager implements IFileManager {
   private readonly projectPlanDir: string;
+  private readonly securityValidator: SecurityValidator;
+  private readonly logger: ILogger;
 
   constructor(basePath: string = process.cwd()) {
     this.projectPlanDir = resolve(basePath, 'project_plan');
+    this.securityValidator = new SecurityValidator(DEFAULT_SECURITY_CONFIG, this.projectPlanDir);
+    this.logger = LoggerFactory.getLogger();
+    
+    this.logger.info('FileManager initialized', { 
+      projectPlanDir: this.projectPlanDir,
+      basePath 
+    });
   }
 
   /**
@@ -135,31 +149,111 @@ export class FileManager {
    * Read file content safely
    */
   async readFile(filePath: string): Promise<string> {
-    const resolvedPath = resolve(filePath);
-    
-    // Security: Ensure path is within project_plan directory
-    if (!resolvedPath.startsWith(this.projectPlanDir)) {
-      throw new Error('Access denied: File must be within project_plan directory');
-    }
+    const startTime = Date.now();
+    LoggerUtils.logMethodEntry(this.logger, 'FileManager', 'readFile', { filePath });
 
-    return await fs.readFile(resolvedPath, 'utf-8');
+    try {
+      // Enhanced security validation
+      const validatedPath = this.securityValidator.validateFilePath(filePath);
+      
+      // Check if file exists before reading
+      await this.validateFileAccessibility(validatedPath);
+      
+      const content = await fs.readFile(validatedPath, 'utf-8');
+      
+      // Additional content validation for security
+      this.securityValidator.validateFileContent(content, `file: ${filePath}`);
+      
+      this.logger.info('File read successfully', { 
+        filePath: validatedPath,
+        contentLength: content.length 
+      });
+      
+      LoggerUtils.logPerformance(this.logger, 'readFile', startTime, { filePath });
+      return content;
+      
+    } catch (error) {
+      LoggerUtils.logMethodError(this.logger, 'FileManager', 'readFile', error as Error, { filePath });
+      throw error;
+    }
   }
 
   /**
    * Write file content safely
    */
   async writeFile(fileName: string, content: string): Promise<string> {
-    await this.ensureProjectPlanDir();
-    
-    const filePath = join(this.projectPlanDir, fileName);
-    
-    // Ensure we're writing to project_plan directory
-    if (dirname(filePath) !== this.projectPlanDir) {
-      throw new Error('Access denied: Can only write files to project_plan directory');
-    }
+    const startTime = Date.now();
+    LoggerUtils.logMethodEntry(this.logger, 'FileManager', 'writeFile', { 
+      fileName, 
+      contentLength: content.length 
+    });
 
-    await fs.writeFile(filePath, content, 'utf-8');
-    return filePath;
+    try {
+      await this.ensureProjectPlanDir();
+      
+      // Comprehensive security validation
+      const validatedPath = this.securityValidator.validateFileOperation(fileName, content, `writeFile: ${fileName}`);
+      
+      // Atomic write operation with backup for existing files
+      const fileExists = await this.fileExists(validatedPath);
+      let backupPath: string | undefined;
+      
+      if (fileExists) {
+        backupPath = `${validatedPath}.backup.${Date.now()}`;
+        await fs.copyFile(validatedPath, backupPath);
+        this.logger.info('Created backup before overwrite', { originalPath: validatedPath, backupPath });
+      }
+
+      try {
+        await fs.writeFile(validatedPath, content, 'utf-8');
+        
+        // Cleanup backup on successful write
+        if (backupPath) {
+          await fs.unlink(backupPath);
+        }
+        
+        this.logger.info('File written successfully', { 
+          filePath: validatedPath,
+          contentLength: content.length,
+          wasOverwrite: fileExists
+        });
+        
+        LoggerUtils.logPerformance(this.logger, 'writeFile', startTime, { fileName });
+        return validatedPath;
+        
+      } catch (writeError) {
+        // Restore from backup if write failed and backup exists
+        if (backupPath && await this.fileExists(backupPath)) {
+          try {
+            await fs.rename(backupPath, validatedPath);
+            this.logger.info('Restored from backup after write failure', { filePath: validatedPath });
+          } catch (restoreError) {
+            this.logger.error('Failed to restore from backup', restoreError as Error, { 
+              originalPath: validatedPath, 
+              backupPath 
+            });
+          }
+        }
+        throw writeError;
+      }
+      
+    } catch (error) {
+      LoggerUtils.logMethodError(this.logger, 'FileManager', 'writeFile', error as Error, { fileName });
+      throw error;
+    }
+  }
+
+  /**
+   * Validate file accessibility and permissions
+   * @param filePath - Path to validate
+   * @throws Error if file is not accessible
+   */
+  private async validateFileAccessibility(filePath: string): Promise<void> {
+    try {
+      await fs.access(filePath, fs.constants.R_OK);
+    } catch (error) {
+      throw new Error(`File not accessible: ${filePath}`);
+    }
   }
 
   /**
@@ -197,7 +291,7 @@ export class FileManager {
   /**
    * Check if file exists
    */
-  private async fileExists(path: string): Promise<boolean> {
+  async fileExists(path: string): Promise<boolean> {
     try {
       await fs.access(path);
       return true;

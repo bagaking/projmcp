@@ -21,7 +21,7 @@ export class RecordTool {
     
     // Generate appropriate template
     const templateType = args.type === 'doc' ? 'docref' : 
-                        args.type === 'code' ? 'coderef' : 'opinions';
+      args.type === 'code' ? 'coderef' : 'opinions';
     const template = this.templateGenerator.generateTemplate(templateType, {
       target: args.target,
       topic: args.target,
@@ -35,7 +35,7 @@ export class RecordTool {
     
     return {
       content: [{
-        type: "text" as const,
+        type: 'text' as const,
         text: `Document recorded successfully as ${fileName}\n\n${fullContent}`
       }]
     };

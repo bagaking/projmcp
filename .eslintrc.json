@@ -18,7 +18,8 @@
     "semi": ["error", "always"],
     "no-console": "off",
     "prefer-const": "error",
-    "no-var": "error"
+    "no-var": "error",
+    "no-unused-vars": "off"
   },
   "ignorePatterns": ["dist/", "node_modules/", "*.js"]
 }

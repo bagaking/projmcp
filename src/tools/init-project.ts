@@ -24,14 +24,14 @@ export class InitProjectTool {
 
       return {
         content: [{
-          type: "text" as const,
+          type: 'text' as const,
           text: `Project plan structure initialized successfully!\n\nFiles created:\n${createdFiles.map(f => `- ${f}`).join('\n')}\n\nYou can now use show_current and show_plan tools to view the content.`
         }]
       };
     } catch (error) {
       return {
         content: [{
-          type: "text" as const,
+          type: 'text' as const,
           text: `Error initializing project plan: ${error instanceof Error ? error.message : 'Unknown error'}`
         }]
       };

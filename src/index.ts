@@ -1,37 +1,56 @@
 #!/usr/bin/env node
 
 /**
- * MCP Project Plan Server Entry Point
- * Command-line interface for the Model Context Protocol server
+ * Enhanced MCP Server Entry Point
+ * Uses dependency injection and clean architecture principles
  */
 
-import { ProjectPlanServer } from './server.js';
+import { FileManager } from './utils/file-manager.js';
+import { TemplateGenerator } from './utils/template-generator.js';
+import { ProjectPlanMCPServer } from './services/mcp-server.js';
+import { LoggerFactory } from './services/logger.js';
 
 /**
- * Main entry point
+ * Application bootstrap with dependency injection
  */
-async function main(): Promise<void> {
+async function bootstrap(): Promise<void> {
+  const logger = LoggerFactory.createLogger();
+  
   try {
-    const server = new ProjectPlanServer();
+    // Initialize core services with dependency injection
+    const fileManager = new FileManager();
+    const templateGenerator = new TemplateGenerator();
+    
+    // Create and start server
+    const server = new ProjectPlanMCPServer(fileManager, templateGenerator);
+    
+    logger.info('Application bootstrap completed, starting server...');
+    
+    // Start the MCP server
     await server.start();
+    
   } catch (error) {
-    console.error('Fatal error starting server:', error);
+    logger.error('Failed to bootstrap application', error as Error);
+    console.error('💥 Failed to start server:', error);
     process.exit(1);
   }
 }
 
 // Handle uncaught exceptions gracefully
 process.on('uncaughtException', (error) => {
-  console.error('Uncaught exception:', error);
+  console.error('💥 Uncaught exception:', error);
   process.exit(1);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled promise rejection at:', promise, 'reason:', reason);
+  console.error('💥 Unhandled promise rejection at:', promise, 'reason:', reason);
   process.exit(1);
 });
 
-// Start the server if this file is run directly
+// Start the application if this file is run directly
 if (import.meta.url === `file://${process.argv[1]}`) {
-  main();
+  bootstrap().catch((error) => {
+    console.error('💥 Bootstrap failed:', error);
+    process.exit(1);
+  });
 }
