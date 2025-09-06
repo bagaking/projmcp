@@ -158,9 +158,11 @@ npm run dev
 ```
 
 `npm run validate-release` checks required package files, build output, lint,
-TypeScript compilation, entry points, and npm package contents. It expects
-`dist/` to already exist, so run `npm run build` first for a direct validation
-pass.
+TypeScript compilation, entry points, npm package size, and the dry-run publish
+manifest. The package manifest check verifies that the public npm package keeps
+the compiled binary and essential docs while excluding source, tests, scripts,
+and local project planning files. It expects `dist/` to already exist, so run
+`npm run build` first for a direct validation pass.
 
 ## Status
 

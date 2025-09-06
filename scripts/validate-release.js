@@ -25,6 +25,7 @@ class ReleaseValidator {
     this.errors = [];
     this.warnings = [];
     this.startTime = Date.now();
+    this.packageManifest = null;
   }
 
   /**
@@ -40,6 +41,7 @@ class ReleaseValidator {
       await this.runCodeQualityChecks();
       await this.validateEntryPoints();
       await this.checkPackageSize();
+      await this.validatePublishedContents();
       await this.validateNpmIgnore();
       
       this.printResults();
@@ -206,24 +208,92 @@ class ReleaseValidator {
     console.log('\n📏 Checking package size...');
     
     try {
-      const result = execSync('npm pack --dry-run', { encoding: 'utf8' });
-      const sizeMatch = result.match(/package size:\s*(\d+\.?\d*\s*[kMG]?B)/i);
+      const manifest = this.getPackageManifest();
       
-      if (sizeMatch) {
-        const size = sizeMatch[1];
-        console.log(`  📦 Package size: ${size}`);
+      if (manifest.size) {
+        const sizeKb = Math.round(manifest.size / 1024 * 100) / 100;
+        const unpackedSizeKb = Math.round(manifest.unpackedSize / 1024 * 100) / 100;
+        console.log(`  📦 Package size: ${sizeKb} KB compressed, ${unpackedSizeKb} KB unpacked`);
         
         // Warn if package is too large (> 10MB)
-        if (size.includes('MB') || size.includes('GB')) {
-          const sizeNum = parseFloat(size);
-          if (sizeNum > 10) {
-            this.warnings.push(`Package size is quite large: ${size}. Consider excluding unnecessary files.`);
-          }
+        if (manifest.size > 10 * 1024 * 1024) {
+          this.warnings.push(`Package size is quite large: ${sizeKb} KB. Consider excluding unnecessary files.`);
         }
       }
     } catch (error) {
       this.warnings.push('Could not determine package size');
     }
+  }
+
+  async validatePublishedContents() {
+    console.log('\n📦 Validating published package contents...');
+
+    try {
+      const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+      const manifest = this.getPackageManifest();
+      const packedFiles = new Set(manifest.files.map(file => file.path));
+      const normalizePackagePath = file => file.startsWith('./') ? file.slice(2) : file;
+      const requiredPackageFiles = new Set([
+        'package.json',
+        'README.md',
+        'LICENSE',
+        'CHANGELOG.md',
+        pkg.main
+      ].map(normalizePackagePath));
+
+      if (pkg.bin) {
+        const binEntries = typeof pkg.bin === 'string' ? [pkg.bin] : Object.values(pkg.bin);
+        binEntries.forEach(entry => requiredPackageFiles.add(normalizePackagePath(entry)));
+      }
+
+      for (const file of requiredPackageFiles) {
+        if (!packedFiles.has(file)) {
+          this.errors.push(`Published package is missing required file: ${file}`);
+        } else {
+          console.log(`  ✅ Includes ${file}`);
+        }
+      }
+
+      const forbiddenPrefixes = ['src/', 'test/', 'tests/', 'scripts/', 'project_plan/', '.github/'];
+      const forbiddenFiles = ['manual-test.sh', 'test-enhanced.js', 'debug-schema.js', 'tsconfig.json'];
+
+      const forbiddenPackedFiles = manifest.files
+        .map(file => file.path)
+        .filter(path =>
+          forbiddenPrefixes.some(prefix => path.startsWith(prefix)) ||
+          forbiddenFiles.includes(path) ||
+          path.startsWith('.eslintrc')
+        );
+
+      if (forbiddenPackedFiles.length > 0) {
+        this.errors.push(`Published package includes maintainer-only files: ${forbiddenPackedFiles.join(', ')}`);
+      } else {
+        console.log('  ✅ Excludes source, tests, scripts, and local project planning files');
+      }
+    } catch (error) {
+      this.errors.push(`Could not validate published package contents: ${error.message}`);
+    }
+  }
+
+  getPackageManifest() {
+    if (this.packageManifest) {
+      return this.packageManifest;
+    }
+
+    const result = execSync('npm pack --dry-run --json', { encoding: 'utf8' });
+    const jsonStart = result.indexOf('[');
+    if (jsonStart === -1) {
+      throw new Error('npm pack did not return a JSON manifest');
+    }
+
+    const manifestList = JSON.parse(result.slice(jsonStart));
+    const manifest = manifestList[0];
+    if (!manifest || !Array.isArray(manifest.files)) {
+      throw new Error('npm pack manifest did not include file entries');
+    }
+
+    this.packageManifest = manifest;
+    return this.packageManifest;
   }
 
   /**
