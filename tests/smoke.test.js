@@ -84,6 +84,16 @@ test('security validator rejects traversal paths and active content', () => {
   );
 });
 
+test('security validator rejects sibling paths sharing the trusted base prefix', () => {
+  const trustedBasePath = join(tmpdir(), 'project_plan');
+  const validator = new SecurityValidator(DEFAULT_SECURITY_CONFIG, trustedBasePath);
+
+  assert.equal(
+    throwsMessage(() => validator.validateFilePath('../project_plan_evil/PLAN.md')).includes('traversal'),
+    true
+  );
+});
+
 test('security validator consistently rejects repeated malicious content checks', () => {
   const validator = new SecurityValidator(
     DEFAULT_SECURITY_CONFIG,

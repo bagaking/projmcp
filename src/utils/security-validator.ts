@@ -3,7 +3,7 @@
  * Provides comprehensive security checks for file paths, content, and sizes
  */
 
-import { resolve, normalize, basename } from 'path';
+import { resolve, normalize, basename, sep } from 'path';
 
 export interface SecurityConfig {
   readonly maxFileSize: number;
@@ -56,7 +56,8 @@ export class SecurityValidator {
     const resolvedPath = resolve(this._trustedBasePath, normalizedPath);
 
     // Ensure path stays within trusted base directory
-    if (!resolvedPath.startsWith(resolve(this._trustedBasePath))) {
+    const trustedBasePath = resolve(this._trustedBasePath);
+    if (resolvedPath !== trustedBasePath && !resolvedPath.startsWith(`${trustedBasePath}${sep}`)) {
       throw new Error('SecurityValidation: Path traversal detected - access denied');
     }
 
