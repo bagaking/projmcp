@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, mkdir, symlink, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -92,6 +92,42 @@ test('security validator rejects sibling paths sharing the trusted base prefix',
     throwsMessage(() => validator.validateFilePath('../project_plan_evil/PLAN.md')).includes('traversal'),
     true
   );
+});
+
+test('file manager rejects symlink read escapes from project_plan', async () => {
+  await withTempProject(async (baseDir) => {
+    const fileManager = new FileManager(baseDir);
+    const outsideDir = join(baseDir, 'outside');
+    const outsideFile = join(outsideDir, 'OUTSIDE.md');
+
+    await fileManager.ensureProjectPlanDir();
+    await mkdir(outsideDir);
+    await writeFile(outsideFile, 'outside secret', 'utf-8');
+    await symlink(outsideFile, join(fileManager.getProjectPlanDir(), 'LINK.md'));
+
+    await assert.rejects(
+      () => fileManager.readFile('LINK.md'),
+      new RegExp('path traversal', 'i')
+    );
+  });
+});
+
+test('file manager rejects symlink write escapes from project_plan', async () => {
+  await withTempProject(async (baseDir) => {
+    const fileManager = new FileManager(baseDir);
+    const outsideDir = join(baseDir, 'outside');
+    const outsideFile = join(outsideDir, 'OUTSIDE.md');
+
+    await fileManager.ensureProjectPlanDir();
+    await mkdir(outsideDir);
+    await writeFile(outsideFile, 'outside secret', 'utf-8');
+    await symlink(outsideFile, join(fileManager.getProjectPlanDir(), 'LINK.md'));
+
+    await assert.rejects(
+      () => fileManager.writeFile('LINK.md', 'overwrite attempt'),
+      new RegExp('path traversal', 'i')
+    );
+  });
 });
 
 test('security validator consistently rejects repeated malicious content checks', () => {

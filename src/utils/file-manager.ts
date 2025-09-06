@@ -154,7 +154,7 @@ export class FileManager implements IFileManager {
 
     try {
       // Enhanced security validation
-      const validatedPath = this.securityValidator.validateFilePath(filePath);
+      const validatedPath = await this.securityValidator.validateExistingFilePath(filePath);
       
       // Check if file exists before reading
       await this.validateFileAccessibility(validatedPath);
@@ -192,7 +192,7 @@ export class FileManager implements IFileManager {
       await this.ensureProjectPlanDir();
       
       // Comprehensive security validation
-      const validatedPath = this.securityValidator.validateFileOperation(fileName, content, `writeFile: ${fileName}`);
+      const validatedPath = await this.securityValidator.validateWritableFileOperation(fileName, content, `writeFile: ${fileName}`);
       
       // Atomic write operation with backup for existing files
       const fileExists = await this.fileExists(validatedPath);

@@ -3,7 +3,8 @@
  * Provides comprehensive security checks for file paths, content, and sizes
  */
 
-import { resolve, normalize, basename, sep } from 'path';
+import { promises as fs } from 'fs';
+import { resolve, normalize, basename, dirname, sep } from 'path';
 
 export interface SecurityConfig {
   readonly maxFileSize: number;
@@ -86,6 +87,34 @@ export class SecurityValidator {
     return resolvedPath;
   }
 
+  async validateExistingFilePath(filePath: string): Promise<string> {
+    const resolvedPath = this.validateFilePath(filePath);
+    const trustedBasePath = await fs.realpath(this._trustedBasePath);
+    const canonicalPath = await fs.realpath(resolvedPath);
+
+    this.validateTrustedContainment(canonicalPath, trustedBasePath);
+    return canonicalPath;
+  }
+
+  async validateWritableFilePath(filePath: string): Promise<string> {
+    const resolvedPath = this.validateFilePath(filePath);
+    const trustedBasePath = await fs.realpath(this._trustedBasePath);
+    const canonicalParentPath = await fs.realpath(dirname(resolvedPath));
+
+    this.validateTrustedContainment(canonicalParentPath, trustedBasePath);
+
+    try {
+      const canonicalPath = await fs.realpath(resolvedPath);
+      this.validateTrustedContainment(canonicalPath, trustedBasePath);
+    } catch (error) {
+      if (!this.isNotFoundError(error)) {
+        throw error;
+      }
+    }
+
+    return resolvedPath;
+  }
+
   /**
    * Validates file content for security threats
    * @param content - Content to validate
@@ -150,5 +179,26 @@ export class SecurityValidator {
     this.validateFileSize(Buffer.byteLength(content, 'utf8'), context);
     
     return validatedPath;
+  }
+
+  async validateWritableFileOperation(filePath: string, content: string, context?: string): Promise<string> {
+    const validatedPath = await this.validateWritableFilePath(filePath);
+    this.validateFileContent(content, context);
+    this.validateFileSize(Buffer.byteLength(content, 'utf8'), context);
+
+    return validatedPath;
+  }
+
+  private validateTrustedContainment(pathToCheck: string, trustedBasePath: string): void {
+    if (pathToCheck !== trustedBasePath && !pathToCheck.startsWith(`${trustedBasePath}${sep}`)) {
+      throw new Error('SecurityValidation: Path traversal detected - access denied');
+    }
+  }
+
+  private isNotFoundError(error: unknown): boolean {
+    return typeof error === 'object'
+      && error !== null
+      && 'code' in error
+      && (error as { code?: string }).code === 'ENOENT';
   }
 }
