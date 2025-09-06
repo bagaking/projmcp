@@ -1,5 +1,10 @@
 # MCP Project Plan Server
 
+[![npm version](https://img.shields.io/npm/v/@bagaking/projmcp.svg)](https://www.npmjs.com/package/@bagaking/projmcp)
+[![Node.js >= 18](https://img.shields.io/badge/node-%3E%3D18-339933.svg)](https://nodejs.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![MCP server](https://img.shields.io/badge/MCP-server-5c6bc0.svg)](https://modelcontextprotocol.io/)
+
 A Model Context Protocol (MCP) server designed to help AI agents better utilize project organization best practices. This server provides standardized APIs for project management, documentation organization, and workflow automation.
 
 ## Features
@@ -24,6 +29,21 @@ claude mcp add projmcp -- npx -y @bagaking/projmcp
 ```
 
 That's it! All tools are now available in Claude Code conversations.
+
+**Claude Desktop config:**
+
+Add this server to your Claude Desktop MCP configuration:
+
+```json
+{
+  "mcpServers": {
+    "projmcp": {
+      "command": "npx",
+      "args": ["-y", "@bagaking/projmcp"]
+    }
+  }
+}
+```
 
 ## MCP Tools
 
