@@ -70,7 +70,8 @@ export class ConsoleLogger implements ILogger {
 
     const output = this.formatLogEntry(logEntry);
     
-    // Use appropriate console method based on log level
+    // MCP stdio reserves stdout for JSON-RPC protocol messages.
+    // Keep all structured application logs on stderr.
     switch (level) {
     case 'error':
       console.error(output);
@@ -79,10 +80,10 @@ export class ConsoleLogger implements ILogger {
       console.warn(output);
       break;
     case 'debug':
-      console.debug(output);
+      console.error(output);
       break;
     default:
-      console.log(output);
+      console.error(output);
     }
   }
 

@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { InitProjectTool } from '../dist/tools/init-project.js';
 import { ListFilesTool } from '../dist/tools/list-files.js';
@@ -17,6 +19,8 @@ process.env.LOG_LEVEL = 'error';
 
 const require = createRequire(import.meta.url);
 const packageJson = require('../package.json');
+const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+const builtEntryPoint = join(repoRoot, 'dist', 'index.js');
 
 async function withTempProject(fn) {
   const baseDir = await mkdtemp(join(tmpdir(), 'projmcp-'));
@@ -87,6 +91,62 @@ test('server status reports the package.json version', () => {
 
   assert.equal(server.getStatus().version, packageJson.version);
 });
+
+test('stdio server startup does not write non-protocol logs to stdout', async () => {
+  await withTempProject(async (baseDir) => {
+    const result = await runServerBriefly(baseDir);
+
+    assert.equal(result.stdout, '');
+    assert.equal(result.stderr.includes('MCP Project Plan Server started successfully'), true);
+  });
+});
+
+function runServerBriefly(cwd) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [builtEntryPoint], {
+      cwd,
+      env: {
+        ...process.env,
+        LOG_LEVEL: 'info'
+      },
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+
+    const timeout = setTimeout(() => {
+      child.kill('SIGTERM');
+    }, 500);
+
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+      if (stderr.includes('MCP Project Plan Server started successfully')) {
+        child.kill('SIGTERM');
+      }
+    });
+    child.on('error', (error) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeout);
+        reject(error);
+      }
+    });
+    child.on('close', () => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeout);
+        resolve({ stdout, stderr });
+      }
+    });
+  });
+}
 
 function throwsMessage(fn) {
   try {
