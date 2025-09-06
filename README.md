@@ -28,7 +28,7 @@ npm install -g @bagaking/projmcp
 claude mcp add projmcp -- npx -y @bagaking/projmcp
 ```
 
-That's it! All tools are now available in Claude Code conversations.
+After Claude Code connects to the server, the project planning tools are available in conversations.
 
 **Claude Desktop config:**
 
@@ -39,11 +39,16 @@ Add this server to your Claude Desktop MCP configuration:
   "mcpServers": {
     "projmcp": {
       "command": "npx",
-      "args": ["-y", "@bagaking/projmcp"]
+      "args": ["-y", "@bagaking/projmcp"],
+      "env": {
+        "LOG_LEVEL": "error"
+      }
     }
   }
 }
 ```
+
+`LOG_LEVEL=error` keeps startup logs away from normal MCP stdio traffic while preserving error diagnostics.
 
 ## MCP Tools
 
