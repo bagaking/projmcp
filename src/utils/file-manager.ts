@@ -4,7 +4,7 @@
  * Implements comprehensive security validation and structured logging
  */
 
-import { promises as fs } from 'fs';
+import { constants, promises as fs } from 'fs';
 import { join, resolve } from 'path';
 import { FileInfo, FileType, FILE_PATTERNS, ProjectStatus } from '../types.js';
 import { IFileManager, ILogger } from '../interfaces/core-interfaces.js';
@@ -85,8 +85,13 @@ export class FileManager implements IFileManager {
       if (type !== 'all' && fileType !== type) continue;
 
       try {
-        const stats = await fs.stat(filePath);
-        const content = await fs.readFile(filePath, 'utf-8');
+        const stats = await fs.lstat(filePath);
+        if (stats.isSymbolicLink() || !stats.isFile()) {
+          continue;
+        }
+
+        await this.securityValidator.validateExistingFilePath(file);
+        const content = await this.readRegularFileNoFollow(filePath);
         const lineCount = content.split('\n').length;
 
         fileInfos.push({
@@ -193,6 +198,7 @@ export class FileManager implements IFileManager {
       
       // Comprehensive security validation
       const validatedPath = await this.securityValidator.validateWritableFileOperation(fileName, content, `writeFile: ${fileName}`);
+      await this.validateWritableTarget(validatedPath);
       
       // Atomic write operation with backup for existing files
       const fileExists = await this.fileExists(validatedPath);
@@ -200,12 +206,12 @@ export class FileManager implements IFileManager {
       
       if (fileExists) {
         backupPath = `${validatedPath}.backup.${Date.now()}`;
-        await fs.copyFile(validatedPath, backupPath);
+        await this.copyRegularFileNoFollow(validatedPath, backupPath);
         this.logger.info('Created backup before overwrite', { originalPath: validatedPath, backupPath });
       }
 
       try {
-        await fs.writeFile(validatedPath, content, 'utf-8');
+        await this.writeRegularFileNoFollow(validatedPath, content);
         
         // Cleanup backup on successful write
         if (backupPath) {
@@ -254,6 +260,72 @@ export class FileManager implements IFileManager {
     } catch (error) {
       throw new Error(`File not accessible: ${filePath}`);
     }
+  }
+
+  private async validateWritableTarget(filePath: string): Promise<void> {
+    try {
+      const stats = await fs.lstat(filePath);
+      if (stats.isSymbolicLink()) {
+        throw new Error('SecurityValidation: Refusing to write symbolic link target');
+      }
+      if (!stats.isFile()) {
+        throw new Error('SecurityValidation: Refusing to write non-file target');
+      }
+    } catch (error) {
+      if (this.isNotFoundError(error)) {
+        return;
+      }
+      throw error;
+    }
+  }
+
+  private async copyRegularFileNoFollow(sourcePath: string, backupPath: string): Promise<void> {
+    const sourceHandle = await fs.open(sourcePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const content = await sourceHandle.readFile();
+      const backupHandle = await fs.open(
+        backupPath,
+        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+        0o600
+      );
+      try {
+        await backupHandle.writeFile(content);
+      } finally {
+        await backupHandle.close();
+      }
+    } finally {
+      await sourceHandle.close();
+    }
+  }
+
+  private async readRegularFileNoFollow(filePath: string): Promise<string> {
+    const fileHandle = await fs.open(filePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      return await fileHandle.readFile('utf-8');
+    } finally {
+      await fileHandle.close();
+    }
+  }
+
+  private async writeRegularFileNoFollow(filePath: string, content: string): Promise<void> {
+    const fileHandle = await fs.open(
+      filePath,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW,
+      0o600
+    );
+
+    try {
+      await fileHandle.writeFile(content, 'utf-8');
+    } finally {
+      await fileHandle.close();
+    }
+  }
+
+  private isNotFoundError(error: unknown): boolean {
+    return typeof error === 'object'
+      && error !== null
+      && 'code' in error
+      && (error as { code?: string }).code === 'ENOENT';
   }
 
   /**

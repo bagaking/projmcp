@@ -112,6 +112,26 @@ test('file manager rejects symlink read escapes from project_plan', async () => 
   });
 });
 
+test('file manager listFiles skips symlink entries escaping project_plan', async () => {
+  await withTempProject(async (baseDir) => {
+    const fileManager = new FileManager(baseDir);
+    const outsideDir = join(baseDir, 'outside');
+    const outsideFile = join(outsideDir, 'OUTSIDE.md');
+
+    await fileManager.ensureProjectPlanDir();
+    await mkdir(outsideDir);
+    await writeFile(outsideFile, 'outside secret\nsecond line', 'utf-8');
+    await symlink(outsideFile, join(fileManager.getProjectPlanDir(), 'DOCREF_001.escape.md'));
+
+    const files = await fileManager.listFiles('all');
+
+    assert.deepEqual(
+      files.map((file) => file.name),
+      []
+    );
+  });
+});
+
 test('file manager rejects symlink write escapes from project_plan', async () => {
   await withTempProject(async (baseDir) => {
     const fileManager = new FileManager(baseDir);
