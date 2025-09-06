@@ -41,7 +41,7 @@ export class QuerySprintTool implements ITool {
       }
 
       const rightNow = getRightNowTime();
-      const content = await this.fileManager.readFile(targetFile.path || targetFile.name);
+      const content = await this.fileManager.readFile(targetFile.name);
       
       return {
         content: [{

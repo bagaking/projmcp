@@ -52,8 +52,19 @@ export class SecurityValidator {
       throw new Error(`SecurityValidation: File path exceeds maximum length of ${this._config.maxFilenameLength}`);
     }
 
-    // Normalize and resolve path to prevent path traversal
+    // FileManager project_plan operations intentionally accept top-level
+    // filenames only. Nested paths would require descriptor-walking to avoid
+    // parent-directory symlink races.
     const normalizedPath = normalize(filePath);
+    if (
+      filePath.includes('/') ||
+      filePath.includes('\\') ||
+      normalizedPath !== basename(normalizedPath)
+    ) {
+      throw new Error('SecurityValidation: Nested paths are not allowed - provide a top-level filename only');
+    }
+
+    // Normalize and resolve path to prevent path traversal
     const resolvedPath = resolve(this._trustedBasePath, normalizedPath);
 
     // Ensure path stays within trusted base directory
@@ -93,7 +104,7 @@ export class SecurityValidator {
     const canonicalPath = await fs.realpath(resolvedPath);
 
     this.validateTrustedContainment(canonicalPath, trustedBasePath);
-    return canonicalPath;
+    return resolvedPath;
   }
 
   async validateWritableFilePath(filePath: string): Promise<string> {

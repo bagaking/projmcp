@@ -89,9 +89,46 @@ test('security validator rejects sibling paths sharing the trusted base prefix',
   const validator = new SecurityValidator(DEFAULT_SECURITY_CONFIG, trustedBasePath);
 
   assert.equal(
-    throwsMessage(() => validator.validateFilePath('../project_plan_evil/PLAN.md')).includes('traversal'),
+    throwsMessage(() => validator.validateFilePath('../project_plan_evil/PLAN.md')).includes('path'),
     true
   );
+});
+
+test('security validator accepts only top-level filenames', () => {
+  const validator = new SecurityValidator(
+    DEFAULT_SECURITY_CONFIG,
+    join(tmpdir(), 'project_plan')
+  );
+
+  assert.equal(
+    throwsMessage(() => validator.validateFilePath('subdir/file.md')).includes('nested'),
+    true
+  );
+  assert.equal(
+    throwsMessage(() => validator.validateFilePath('subdir\\file.md')).includes('nested'),
+    true
+  );
+  assert.equal(
+    throwsMessage(() => validator.validateFilePath('./PLAN.md')).includes('nested'),
+    true
+  );
+});
+
+test('file manager rejects nested read and write paths', async () => {
+  await withTempProject(async (baseDir) => {
+    const fileManager = new FileManager(baseDir);
+
+    await fileManager.ensureProjectPlanDir();
+
+    await assert.rejects(
+      () => fileManager.readFile('subdir/file.md'),
+      new RegExp('nested paths', 'i')
+    );
+    await assert.rejects(
+      () => fileManager.writeFile('subdir/file.md', 'content'),
+      new RegExp('nested paths', 'i')
+    );
+  });
 });
 
 test('file manager rejects symlink read escapes from project_plan', async () => {
@@ -108,6 +145,22 @@ test('file manager rejects symlink read escapes from project_plan', async () => 
     await assert.rejects(
       () => fileManager.readFile('LINK.md'),
       new RegExp('path traversal', 'i')
+    );
+  });
+});
+
+test('file manager rejects symlink reads even when the target stays in project_plan', async () => {
+  await withTempProject(async (baseDir) => {
+    const fileManager = new FileManager(baseDir);
+    const planDir = fileManager.getProjectPlanDir();
+
+    await fileManager.ensureProjectPlanDir();
+    await writeFile(join(planDir, 'TARGET.md'), 'inside content', 'utf-8');
+    await symlink(join(planDir, 'TARGET.md'), join(planDir, 'LINK.md'));
+
+    await assert.rejects(
+      () => fileManager.readFile('LINK.md'),
+      new RegExp('ELOOP|symbolic link|symlink|too many', 'i')
     );
   });
 });
@@ -132,6 +185,24 @@ test('file manager listFiles skips symlink entries escaping project_plan', async
   });
 });
 
+test('file manager listFiles skips symlink entries inside project_plan', async () => {
+  await withTempProject(async (baseDir) => {
+    const fileManager = new FileManager(baseDir);
+    const planDir = fileManager.getProjectPlanDir();
+
+    await fileManager.ensureProjectPlanDir();
+    await writeFile(join(planDir, 'DOCREF_001.target.md'), 'inside content', 'utf-8');
+    await symlink(join(planDir, 'DOCREF_001.target.md'), join(planDir, 'DOCREF_002.link.md'));
+
+    const files = await fileManager.listFiles('all');
+
+    assert.deepEqual(
+      files.map((file) => file.name),
+      ['DOCREF_001.target.md']
+    );
+  });
+});
+
 test('file manager rejects symlink write escapes from project_plan', async () => {
   await withTempProject(async (baseDir) => {
     const fileManager = new FileManager(baseDir);
@@ -146,6 +217,22 @@ test('file manager rejects symlink write escapes from project_plan', async () =>
     await assert.rejects(
       () => fileManager.writeFile('LINK.md', 'overwrite attempt'),
       new RegExp('path traversal', 'i')
+    );
+  });
+});
+
+test('file manager rejects symlink writes even when the target stays in project_plan', async () => {
+  await withTempProject(async (baseDir) => {
+    const fileManager = new FileManager(baseDir);
+    const planDir = fileManager.getProjectPlanDir();
+
+    await fileManager.ensureProjectPlanDir();
+    await writeFile(join(planDir, 'TARGET.md'), 'inside content', 'utf-8');
+    await symlink(join(planDir, 'TARGET.md'), join(planDir, 'LINK.md'));
+
+    await assert.rejects(
+      () => fileManager.writeFile('LINK.md', 'overwrite attempt'),
+      new RegExp('symbolic link', 'i')
     );
   });
 });

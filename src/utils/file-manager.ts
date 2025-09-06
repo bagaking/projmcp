@@ -164,7 +164,7 @@ export class FileManager implements IFileManager {
       // Check if file exists before reading
       await this.validateFileAccessibility(validatedPath);
       
-      const content = await fs.readFile(validatedPath, 'utf-8');
+      const content = await this.readRegularFileNoFollow(validatedPath);
       
       // Additional content validation for security
       this.securityValidator.validateFileContent(content, `file: ${filePath}`);
@@ -280,6 +280,8 @@ export class FileManager implements IFileManager {
   }
 
   private async copyRegularFileNoFollow(sourcePath: string, backupPath: string): Promise<void> {
+    this.assertNoFollowAvailable();
+
     const sourceHandle = await fs.open(sourcePath, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
       const content = await sourceHandle.readFile();
@@ -299,6 +301,8 @@ export class FileManager implements IFileManager {
   }
 
   private async readRegularFileNoFollow(filePath: string): Promise<string> {
+    this.assertNoFollowAvailable();
+
     const fileHandle = await fs.open(filePath, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
       return await fileHandle.readFile('utf-8');
@@ -308,6 +312,8 @@ export class FileManager implements IFileManager {
   }
 
   private async writeRegularFileNoFollow(filePath: string, content: string): Promise<void> {
+    this.assertNoFollowAvailable();
+
     const fileHandle = await fs.open(
       filePath,
       constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW,
@@ -326,6 +332,12 @@ export class FileManager implements IFileManager {
       && error !== null
       && 'code' in error
       && (error as { code?: string }).code === 'ENOENT';
+  }
+
+  private assertNoFollowAvailable(): void {
+    if (typeof constants.O_NOFOLLOW !== 'number') {
+      throw new Error('SecurityValidation: O_NOFOLLOW is unavailable on this platform');
+    }
   }
 
   /**
