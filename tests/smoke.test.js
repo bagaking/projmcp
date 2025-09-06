@@ -84,6 +84,24 @@ test('security validator rejects traversal paths and active content', () => {
   );
 });
 
+test('security validator consistently rejects repeated malicious content checks', () => {
+  const validator = new SecurityValidator(
+    DEFAULT_SECURITY_CONFIG,
+    join(tmpdir(), 'project_plan')
+  );
+
+  const maliciousContent = '<script>alert(1)</script>';
+
+  assert.equal(
+    throwsMessage(() => validator.validateFileContent(maliciousContent)).includes('malicious'),
+    true
+  );
+  assert.equal(
+    throwsMessage(() => validator.validateFileContent(maliciousContent)).includes('malicious'),
+    true
+  );
+});
+
 test('server status reports the package.json version', () => {
   const fileManager = new FileManager(tmpdir());
   const templateGenerator = new TemplateGenerator();

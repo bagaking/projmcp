@@ -104,6 +104,7 @@ export class SecurityValidator {
 
     // Check for malicious patterns
     for (const pattern of this._config.forbiddenPatterns) {
+      pattern.lastIndex = 0;
       if (pattern.test(content)) {
         const contextMsg = context ? ` in ${context}` : '';
         throw new Error(`SecurityValidation: Potentially malicious content detected${contextMsg}`);
