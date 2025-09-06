@@ -1,17 +1,22 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
 import { InitProjectTool } from '../dist/tools/init-project.js';
 import { ListFilesTool } from '../dist/tools/list-files.js';
+import { ProjectPlanMCPServer } from '../dist/services/mcp-server.js';
 import { QuerySprintTool } from '../dist/tools/query-sprint.js';
 import { FileManager } from '../dist/utils/file-manager.js';
 import { SecurityValidator, DEFAULT_SECURITY_CONFIG } from '../dist/utils/security-validator.js';
 import { TemplateGenerator } from '../dist/utils/template-generator.js';
 
 process.env.LOG_LEVEL = 'error';
+
+const require = createRequire(import.meta.url);
+const packageJson = require('../package.json');
 
 async function withTempProject(fn) {
   const baseDir = await mkdtemp(join(tmpdir(), 'projmcp-'));
@@ -73,6 +78,14 @@ test('security validator rejects traversal paths and active content', () => {
     throwsMessage(() => validator.validateFileContent('<script>alert(1)</script>')).includes('malicious'),
     true
   );
+});
+
+test('server status reports the package.json version', () => {
+  const fileManager = new FileManager(tmpdir());
+  const templateGenerator = new TemplateGenerator();
+  const server = new ProjectPlanMCPServer(fileManager, templateGenerator);
+
+  assert.equal(server.getStatus().version, packageJson.version);
 });
 
 function throwsMessage(fn) {

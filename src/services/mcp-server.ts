@@ -9,6 +9,7 @@ import { z } from 'zod';
 
 import { IFileManager, ITemplateGenerator, ILogger, ITool } from '../interfaces/core-interfaces.js';
 import { LoggerFactory, LoggerUtils } from './logger.js';
+import { PACKAGE_METADATA } from '../utils/package-metadata.js';
 
 // Tool implementations
 import { ListFilesTool } from '../tools/list-files.js';
@@ -27,6 +28,7 @@ export class ProjectPlanMCPServer {
   private readonly server: McpServer;
   private readonly logger: ILogger;
   private readonly tools: ITool[];
+  private readonly serverName = 'mcp-project-plan-server';
   
   constructor(
     private readonly fileManager: IFileManager,
@@ -34,8 +36,8 @@ export class ProjectPlanMCPServer {
   ) {
     this.logger = LoggerFactory.getLogger();
     this.server = new McpServer({
-      name: 'mcp-project-plan-server',
-      version: '0.3.10',
+      name: this.serverName,
+      version: PACKAGE_METADATA.version,
     });
     
     // Initialize all tool instances
@@ -50,8 +52,8 @@ export class ProjectPlanMCPServer {
     ];
     
     this.logger.info('ProjectPlanMCPServer initialized', {
-      serverName: 'mcp-project-plan-server',
-      version: '0.3.10',
+      serverName: this.serverName,
+      version: PACKAGE_METADATA.version,
       toolCount: this.tools.length
     });
     
@@ -103,6 +105,7 @@ export class ProjectPlanMCPServer {
     toolCount: number;
     toolNames: string[];
     projectPlanDir: string;
+    version: string;
     startTime: string;
     } {
     const toolNames = this.tools.map(tool => tool.name);
@@ -112,6 +115,7 @@ export class ProjectPlanMCPServer {
       toolCount: toolNames.length,
       toolNames,
       projectPlanDir: this.fileManager.getProjectPlanDir(),
+      version: PACKAGE_METADATA.version,
       startTime: new Date().toISOString()
     };
   }
