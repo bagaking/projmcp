@@ -166,6 +166,14 @@ class ReleaseValidator {
     } catch (error) {
       this.errors.push('TypeScript compilation failed');
     }
+
+    try {
+      console.log('  🧪 Running smoke tests against build output...');
+      execSync('node --test tests/*.test.js', { stdio: 'inherit' });
+      console.log('  ✅ Smoke tests passed');
+    } catch (error) {
+      this.errors.push('Smoke tests failed');
+    }
   }
 
   /**
