@@ -79,8 +79,8 @@ This server implements the "项目组织的最佳实践" (Project Organization B
 
 ```
 src/
-├── index.ts                    # Server entry point
-├── server.ts                   # MCP server core logic  
+├── index.ts                    # Package binary entry point
+├── direct-mcp-server.ts        # Direct SDK diagnostic server
 ├── interfaces/                 # TypeScript interfaces
 │   └── core-interfaces.ts      # Core abstractions (ITool, IFileManager, etc.)
 ├── services/                   # Core services
@@ -90,31 +90,61 @@ src/
 ├── tools/                      # MCP tool implementations
 │   ├── list-files.ts          # File listing with metadata
 │   ├── init-project.ts        # Project initialization
-│   ├── show-status.ts         # Status display tools
+│   ├── show-current.ts        # CURRENT.md display tool
+│   ├── show-plan.ts           # PLAN.md display tool
+│   ├── show-status.ts         # Legacy status helper
 │   ├── record.ts              # Documentation recording
-│   └── query-sprint.ts        # Sprint querying
+│   ├── query-sprint.ts        # Sprint querying
+│   └── right-now.ts           # Time metadata tool
+├── templates/                  # Static document template strings
 ├── utils/                      # Utilities
 │   ├── file-manager.ts        # Secure file operations
 │   ├── security-validator.ts  # File security validation
-│   └── template-generator.ts  # Document template generation
+│   ├── template-generator.ts  # Document template generation
+│   └── time-helper.ts         # Time formatting helpers
 └── types.ts                   # TypeScript type definitions
 ```
 
 ## Development
 
+This repository currently builds a TypeScript MCP `project_plan` server. The
+published binary runs `dist/index.js`, compiled from `src/index.ts`, and wires
+the file manager, template generator, and MCP tool implementations into a stdio
+MCP server.
+
 ```bash
 # Install dependencies
-npm install
+npm ci
 
 # Build project
 npm run build
 
-# Run linting
+# Run smoke tests against the compiled dist output
+npm test
+
+# Run linting only
 npm run lint
+
+# Validate release readiness after a build
+npm run validate-release
 
 # Start in development mode
 npm run dev
 ```
+
+`npm run validate-release` checks required package files, build output, lint,
+TypeScript compilation, entry points, and npm package contents. It expects
+`dist/` to already exist, so run `npm run build` first for a direct validation
+pass.
+
+## Status
+
+The project is usable as an MCP server for `project_plan` file workflows, but it
+should be treated as an active TypeScript package rather than a broadly hardened
+stable platform. Current automated coverage is intentionally small: build,
+lint, release validation, and Node built-in smoke tests for the compiled tool
+path. Add focused tests around changed tool behavior before widening the API or
+release surface.
 
 ## Requirements
 
