@@ -1,11 +1,20 @@
-# MCP Project Plan Server
+# ProjMCP
 
 [![npm version](https://img.shields.io/npm/v/@bagaking/projmcp.svg)](https://www.npmjs.com/package/@bagaking/projmcp)
 [![Node.js >= 18](https://img.shields.io/badge/node-%3E%3D18-339933.svg)](https://nodejs.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![MCP server](https://img.shields.io/badge/MCP-server-5c6bc0.svg)](https://modelcontextprotocol.io/)
 
-A Model Context Protocol (MCP) server designed to help AI agents better utilize project organization best practices. This server provides standardized APIs for project management, documentation organization, and workflow automation.
+Bagaking's MCP server for project planning, project memory, and lightweight
+execution tracking. ProjMCP gives AI coding agents a consistent `project_plan/`
+workspace with tools for reading the current plan, recording references and
+decisions, querying sprint notes, and initializing the standard planning file
+layout.
+
+The published npm package is intentionally runtime-focused: it ships the
+compiled MCP server in `dist/`, this README, the license, and the changelog.
+Source, tests, validation scripts, CI, and local `project_plan/` files are kept
+out of the npm artifact by the package manifest and release validator.
 
 ## Features
 
@@ -49,6 +58,14 @@ Add this server to your Claude Desktop MCP configuration:
 ```
 
 `LOG_LEVEL=error` keeps startup logs away from normal MCP stdio traffic while preserving error diagnostics.
+
+**Installed binary:**
+
+```bash
+npx -y @bagaking/projmcp
+```
+
+The package exposes the `bagaking-projmcp` binary for global installs.
 
 ## MCP Tools
 
@@ -150,8 +167,12 @@ npm test
 # Run linting only
 npm run lint
 
-# Validate release readiness after a build
+# Validate release readiness
+npm run build
 npm run validate-release
+
+# Inspect the exact npm package contents
+npm pack --dry-run
 
 # Start in development mode
 npm run dev
@@ -163,6 +184,20 @@ manifest. The package manifest check verifies that the public npm package keeps
 the compiled binary and essential docs while excluding source, tests, scripts,
 and local project planning files. It expects `dist/` to already exist, so run
 `npm run build` first for a direct validation pass.
+
+## Release Preflight
+
+Before publishing, run the same checks used by CI and the release validator:
+
+```bash
+npm test
+npm run validate-release
+npm run release:dry-run
+```
+
+`npm run release:dry-run` chains the release validator with `npm publish
+--dry-run`, so it is the highest-signal local check for the package that would
+be published.
 
 ## Status
 
