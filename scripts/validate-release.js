@@ -8,6 +8,7 @@
 import { execSync } from 'child_process';
 import { existsSync, readFileSync, statSync } from 'fs';
 import { resolve } from 'path';
+import { pathToFileURL } from 'node:url';
 
 const REQUIRED_FILES = [
   'README.md',
@@ -19,6 +20,80 @@ const OPTIONAL_FILES = [
   'LICENSE',
   'CHANGELOG.md'
 ];
+
+export function parsePackageManifest(stdout) {
+  let foundJsonArray = false;
+
+  for (const manifestList of parseJsonArrays(stdout)) {
+    foundJsonArray = true;
+    const manifest = manifestList[0];
+
+    if (manifest && Array.isArray(manifest.files)) {
+      return manifest;
+    }
+  }
+
+  if (foundJsonArray) {
+    throw new Error('npm pack manifest did not include file entries');
+  }
+
+  throw new Error('npm pack did not return a JSON manifest');
+}
+
+function *parseJsonArrays(stdout) {
+  for (let start = stdout.indexOf('['); start !== -1; start = stdout.indexOf('[', start + 1)) {
+    const end = findJsonArrayEnd(stdout, start);
+
+    if (end === -1) {
+      continue;
+    }
+
+    const candidate = stdout.slice(start, end + 1);
+
+    try {
+      const value = JSON.parse(candidate);
+      if (Array.isArray(value)) {
+        yield value;
+      }
+    } catch {
+      // Keep scanning; prepack/build logs may include bracketed prefixes.
+    }
+  }
+}
+
+function findJsonArrayEnd(input, start) {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < input.length; index += 1) {
+    const char = input[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+    } else if (char === '[') {
+      depth += 1;
+    } else if (char === ']') {
+      depth -= 1;
+      if (depth === 0) {
+        return index;
+      }
+    }
+  }
+
+  return -1;
+}
 
 class ReleaseValidator {
   constructor() {
@@ -281,18 +356,7 @@ class ReleaseValidator {
     }
 
     const result = execSync('npm pack --dry-run --json', { encoding: 'utf8' });
-    const jsonStart = result.indexOf('[');
-    if (jsonStart === -1) {
-      throw new Error('npm pack did not return a JSON manifest');
-    }
-
-    const manifestList = JSON.parse(result.slice(jsonStart));
-    const manifest = manifestList[0];
-    if (!manifest || !Array.isArray(manifest.files)) {
-      throw new Error('npm pack manifest did not include file entries');
-    }
-
-    this.packageManifest = manifest;
+    this.packageManifest = parsePackageManifest(result);
     return this.packageManifest;
   }
 
@@ -358,5 +422,7 @@ class ReleaseValidator {
 }
 
 // Run validation
-const validator = new ReleaseValidator();
-validator.validate().catch(console.error);
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const validator = new ReleaseValidator();
+  validator.validate().catch(console.error);
+}
