@@ -5,43 +5,58 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![MCP server](https://img.shields.io/badge/MCP-server-5c6bc0.svg)](https://modelcontextprotocol.io/)
 
-Bagaking's MCP server for project planning, project memory, and lightweight
-execution tracking. ProjMCP gives AI coding agents a consistent `project_plan/`
-workspace with tools for reading the current plan, recording references and
-decisions, querying sprint notes, and initializing the standard planning file
-layout.
+ProjMCP is a stdio MCP server for one local workspace convention:
+`project_plan/`. It gives MCP clients tools to initialize the planning
+directory, read `PLAN.md` and `CURRENT.md`, list planning files, record
+reference notes, query sprint notes, and ask for current time metadata.
 
-The published npm package is intentionally runtime-focused: it ships the
-compiled MCP server in `dist/`, this README, the license, and the changelog.
-Source, tests, validation scripts, CI, and local `project_plan/` files are kept
-out of the npm artifact by the package manifest and release validator.
+It is not a hosted service and it does not manage external project systems. The
+server runs in the client-selected working directory and reads or writes only
+the local `project_plan/` directory under that working directory.
 
-## Features
+## Runtime Contract
 
-- **File Management**: List and organize project files by type (sprint, doc, code, opinion)
-- **Document Operations**: Record and retrieve documentation with proper categorization
-- **Project Status**: Quick access to current project state and planning documents
-- **Template Generation**: Initialize project structures following best practices
-- **Token Efficient**: Optimized responses to minimize AI agent token consumption
+- Transport: MCP over stdio, implemented with the TypeScript MCP SDK.
+- Package entry point: `dist/index.js`.
+- Binary name: `bagaking-projmcp`.
+- Node runtime: `>=18.0.0`.
+- Workspace state: `<client cwd>/project_plan/`.
+- Protocol channel: JSON-RPC messages use stdout; application diagnostics use
+  stderr.
+- Published package: the compiled `dist/` tree, `README.md`, `LICENSE`, and
+  `CHANGELOG.md`. Source, tests, scripts, CI files, and local `project_plan/`
+  files are release-validator exclusions.
 
-## Installation
+Set `LOG_LEVEL=error` in client configs when you want only error diagnostics on
+stderr. The test suite also checks that startup logs do not write non-protocol
+text to stdout.
+
+## Install
 
 ```bash
 npm install -g @bagaking/projmcp
 ```
 
-## Quick Start
+You can also run it without a global install:
 
-**One-command setup:**
+```bash
+npx -y @bagaking/projmcp
+```
+
+## Client Integration
+
+### Claude Code
+
 ```bash
 claude mcp add projmcp -- npx -y @bagaking/projmcp
 ```
 
-After Claude Code connects to the server, the project planning tools are available in conversations.
+After reconnecting Claude Code, list the ProjMCP tools before invoking
+state-changing tools.
 
-**Claude Desktop config:**
+### Claude Desktop
 
-Add this server to your Claude Desktop MCP configuration:
+Add the server to the Claude Desktop MCP configuration:
 
 ```json
 {
@@ -57,194 +72,183 @@ Add this server to your Claude Desktop MCP configuration:
 }
 ```
 
-`LOG_LEVEL=error` keeps startup logs away from normal MCP stdio traffic while preserving error diagnostics.
+Restart or reconnect the client after changing the config. This README does not
+claim support for other clients beyond standard stdio MCP compatibility.
 
-**Installed binary:**
+## JSON-RPC Smoke
 
-```bash
-npx -y @bagaking/projmcp
-```
-
-The package exposes the `bagaking-projmcp` binary for global installs.
-
-## MCP Smoke And Integration Check
-
-Use this path when you want to confirm the package, stdio server, and MCP tool
-surface are all wired correctly before publishing or adding the server to an
-agent client:
+Use this when checking the compiled server or debugging client integration:
 
 ```bash
-# From a fresh checkout
 npm ci
-npm test
+npm run build
 
-# Verify the compiled stdio server answers the MCP tools/list request
 LOG_LEVEL=error node dist/index.js <<'EOF'
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"projmcp-smoke","version":"0.0.0"}}}
 {"jsonrpc":"2.0","method":"notifications/initialized","params":{}}
 {"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
 EOF
-
-# Check the package that npm would publish
-npm run release:dry-run
 ```
 
-The `tools/list` response should include `list_files`, `show_current`,
-`show_plan`, `init_project_plan`, `record`, `query_sprint`, and `right_now` on
-stdout. Startup diagnostics should stay on stderr so they do not corrupt MCP
-stdio messages.
+Expected result:
 
-For an installed-package smoke check, use the same JSON-RPC request with
-`npx -y @bagaking/projmcp` instead of `node dist/index.js`. For Claude Desktop
-or Claude Code, add the config from Quick Start, restart or reconnect the
-client, and confirm that the client can list the ProjMCP tools before invoking
-state-changing tools such as `init_project_plan` or `record`.
+- stdout contains MCP JSON-RPC responses, including a `tools/list` response.
+- the tool names include `list_files`, `show_current`, `show_plan`,
+  `init_project_plan`, `record`, `query_sprint`, and `right_now`.
+- stderr may contain startup diagnostics.
+- stdout must not contain human-readable application logs outside JSON-RPC
+  messages.
 
-## MCP Tools
+For the published package path, replace `node dist/index.js` with
+`npx -y @bagaking/projmcp`.
 
-The server provides these tools for AI agents:
+## Tool Contract
 
-### Available Tools
+All tools return MCP text content. Several tools also attach `_meta` with the
+tool name, execution time, file counts, or `right_now` time metadata. Tool
+errors are returned as MCP tool responses with `isError: true`; transport-level
+startup failures exit the process.
 
-- **`list_files`** - List and analyze project files by type (all/sprint/doc/code/opinion)
-- **`show_current`** - Display current project status from CURRENT.md  
-- **`show_plan`** - Display project plan from PLAN.md
-- **`init_project_plan`** - Initialize complete project structure
-- **`record`** - Record structured documentation (doc/code/opinion types)
-- **`query_sprint`** - Query specific sprint information by ID
-- **`right_now`** - Get current time in multiple formats
+| Tool | Inputs | Reads | Writes | Output |
+| --- | --- | --- | --- | --- |
+| `list_files` | `type`: `all`, `sprint`, `doc`, `code`, or `opinion` | `project_plan/*.md` | No | JSON text with `summary` and `files` metadata |
+| `show_current` | none | `project_plan/CURRENT.md` | No | `CURRENT.md` text |
+| `show_plan` | none | `project_plan/PLAN.md` | No | `PLAN.md` text |
+| `init_project_plan` | none | template strings | Yes | creates or overwrites the standard planning files |
+| `record` | `type`: `doc`, `code`, or `opinion`; `target`; `content` | existing files for numbering | Yes | creates a structured reference file and returns its content |
+| `query_sprint` | `sprintId` matching `M##_S##` | matching sprint file | No | matching sprint Markdown text, or available sprint names |
+| `right_now` | none | No project files | No | JSON text with UTC, local, and Unix time formats |
 
-**Usage:** Just call tools directly in conversations or use `/mcp tool_name` syntax.
+### File Naming
 
-### Response Format
+`init_project_plan` creates the core planning layout:
 
-All tools return structured JSON with:
-- **Content**: Main response data
-- **Metadata**: Statistics and context  
-- **Timestamps**: Right-now time information
-
-## Project Directory Structure
-
-After running `init_project_plan`, your project will have this structure:
-
-```
+```text
 project_plan/
-├── PLAN.md                           # Master project planning document
-├── CURRENT.md                        # Current execution status
-├── M01_S01.initial_setup.md         # Sprint execution plans
-├── DOCREF_001.topic.md               # External documentation references
-├── CODEREF_001.topic.md              # Code implementation references
-└── OPINIONS_001.topic.md             # Key decisions and observations
++-- PLAN.md
++-- CURRENT.md
+`-- M01_S01.initial_setup.md
 ```
 
-### Best Practices Methodology
+`record` creates files by type:
 
-This server implements the "项目组织的最佳实践" (Project Organization Best Practices):
+- `doc` -> `DOCREF_###.<target>.md`
+- `code` -> `CODEREF_<target>.md`
+- `opinion` -> `OPINIONS_###.<target>.md`
 
-1. **Structured Planning**: Separate planning (PLAN.md) from execution tracking (CURRENT.md)
-2. **Sprint Organization**: Each milestone/sprint gets dedicated planning documents
-3. **Documentation Types**: 
-   - `DOCREF`: External documentation and research
-   - `CODEREF`: Implementation patterns and code examples
-   - `OPINIONS`: Decision records and key observations
-4. **Metadata Tracking**: All documents include creation dates, purposes, and evidence levels
-5. **Flat File Structure**: All files in single directory with semantic naming
+`query_sprint` looks for sprint files whose names start with the requested
+`M##_S##` id.
 
-## Source Code Structure
+## State-Changing Tools
 
+Only two tools mutate workspace state:
+
+- `init_project_plan`
+- `record`
+
+Both write under `<client cwd>/project_plan/`. `init_project_plan` writes the
+standard files from bundled templates. Existing files are handled by the file
+manager write path, which creates a temporary backup before overwriting and
+removes it after a successful write.
+
+Recommended client policy:
+
+- run `list_files`, `show_current`, or `show_plan` first to inspect current
+  state.
+- call `init_project_plan` only when the target workspace should receive or
+  refresh the standard planning files.
+- call `record` only when the client has explicit content to persist.
+- keep the MCP server working directory scoped to the repository whose
+  `project_plan/` should be read or changed.
+
+## Security Model
+
+ProjMCP is a local file-writing MCP server. Treat write-capable tools as
+workspace mutations.
+
+Implemented file boundary:
+
+- all project file operations are rooted at `<client cwd>/project_plan/`.
+- file operations accept top-level filenames only; nested paths are rejected.
+- path traversal, `~`, unsafe filename characters, and unsupported extensions
+  are rejected.
+- allowed extensions are `.md`, `.json`, and `.txt`; the current tools operate
+  on Markdown planning files.
+- content is capped by length and byte size.
+- obvious active-content patterns such as script tags, `javascript:`, iframes,
+  event-handler attributes, and `eval(` are rejected.
+- reads and writes use `O_NOFOLLOW` where available and reject symlink targets.
+- directory listings skip symlink and non-file entries.
+
+This does not make arbitrary user-provided Markdown trustworthy. Clients should
+still review content before invoking `record`, and users should run the server
+only in workspaces where local `project_plan/` writes are acceptable.
+
+## Release Gate
+
+Before publishing or changing the MCP surface, run:
+
+```bash
+npm test
+npm run release:dry-run
+git diff --check
+git diff --cached --check
 ```
-src/
-├── index.ts                    # Package binary entry point
-├── direct-mcp-server.ts        # Direct SDK diagnostic server
-├── interfaces/                 # TypeScript interfaces
-│   └── core-interfaces.ts      # Core abstractions (ITool, IFileManager, etc.)
-├── services/                   # Core services
-│   ├── logger.ts              # Structured logging service
-│   ├── mcp-server.ts          # Enhanced MCP server with DI
-│   └── tool-registry.ts       # Tool registration and management
-├── tools/                      # MCP tool implementations
-│   ├── list-files.ts          # File listing with metadata
-│   ├── init-project.ts        # Project initialization
-│   ├── show-current.ts        # CURRENT.md display tool
-│   ├── show-plan.ts           # PLAN.md display tool
-│   ├── show-status.ts         # Legacy status helper
-│   ├── record.ts              # Documentation recording
-│   ├── query-sprint.ts        # Sprint querying
-│   └── right-now.ts           # Time metadata tool
-├── templates/                  # Static document template strings
-├── utils/                      # Utilities
-│   ├── file-manager.ts        # Secure file operations
-│   ├── security-validator.ts  # File security validation
-│   ├── template-generator.ts  # Document template generation
-│   └── time-helper.ts         # Time formatting helpers
-└── types.ts                   # TypeScript type definitions
-```
+
+`npm test` runs the TypeScript build and Node built-in tests. Current smoke
+coverage includes tool initialization, `project_plan` inspection, traversal and
+symlink rejection, content validation, package version reporting, and the
+stdout/stderr MCP boundary.
+
+`npm run release:dry-run` runs `scripts/validate-release.js` and then
+`npm publish --dry-run`. The release validator checks required files, package
+metadata, build output, ESLint, TypeScript compilation, smoke tests, entry
+points, npm package size, and the packed file manifest.
 
 ## Development
 
-This repository currently builds a TypeScript MCP `project_plan` server. The
-published binary runs `dist/index.js`, compiled from `src/index.ts`, and wires
-the file manager, template generator, and MCP tool implementations into a stdio
-MCP server.
-
 ```bash
-# Install dependencies
 npm ci
-
-# Build project
 npm run build
-
-# Run smoke tests against the compiled dist output
 npm test
-
-# Run linting only
 npm run lint
-
-# Validate release readiness
-npm run build
 npm run validate-release
-
-# Inspect the exact npm package contents
 npm pack --dry-run
-
-# Start in development mode
 npm run dev
 ```
 
-`npm run validate-release` checks required package files, build output, lint,
-TypeScript compilation, entry points, npm package size, and the dry-run publish
-manifest. The package manifest check verifies that the public npm package keeps
-the compiled binary and essential docs while excluding source, tests, scripts,
-and local project planning files. It expects `dist/` to already exist, so run
-`npm run build` first for a direct validation pass.
+Repository shape:
 
-## Release Preflight
-
-Before publishing, run the same checks used by CI and the release validator:
-
-```bash
-npm test
-npm run validate-release
-npm run release:dry-run
+```text
+src/
++-- index.ts
++-- services/
+|   +-- logger.ts
+|   +-- mcp-server.ts
+|   `-- tool-registry.ts
++-- tools/
+|   +-- init-project.ts
+|   +-- list-files.ts
+|   +-- query-sprint.ts
+|   +-- record.ts
+|   +-- right-now.ts
+|   +-- show-current.ts
+|   `-- show-plan.ts
++-- templates/
+`-- utils/
+    +-- file-manager.ts
+    +-- package-metadata.ts
+    +-- security-validator.ts
+    +-- template-generator.ts
+    `-- time-helper.ts
 ```
-
-`npm run release:dry-run` chains the release validator with `npm publish
---dry-run`, so it is the highest-signal local check for the package that would
-be published.
 
 ## Status
 
-The project is usable as an MCP server for `project_plan` file workflows, but it
-should be treated as an active TypeScript package rather than a broadly hardened
-stable platform. Current automated coverage is intentionally small: build,
-lint, release validation, and Node built-in smoke tests for the compiled tool
-path. Add focused tests around changed tool behavior before widening the API or
-release surface.
-
-## Requirements
-
-- Node.js >= 18.0.0
-- TypeScript >= 5.0.0
+ProjMCP is usable for local `project_plan/` workflows and has a small automated
+smoke suite. Treat it as an active TypeScript MCP package: add focused tests for
+any changed tool behavior, file boundary, protocol boundary, or release package
+surface.
 
 ## License
 
