@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "bagaking-projmcp": "./dist/index.js"
+    "bagaking-projmcp": "dist/index.js"
   },
   "scripts": {
     "build": "tsc",
