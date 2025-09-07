@@ -29,11 +29,14 @@ export class ShowPlanTool implements ITool {
       };
     } catch (error) {
       const rightNow = getRightNowTime();
+      const errorMessage = this.isNotFoundError(error)
+        ? 'PLAN.md not found. Please run init_project_plan first.'
+        : `Error reading PLAN.md: ${error instanceof Error ? error.message : 'Unknown error'}`;
       
       return {
         content: [{
           type: 'text' as const,
-          text: 'PLAN.md not found. Please run init_project_plan first.'
+          text: errorMessage
         }],
         isError: true,
         _meta: {
@@ -43,5 +46,14 @@ export class ShowPlanTool implements ITool {
         }
       };
     }
+  }
+
+  private isNotFoundError(error: unknown): boolean {
+    if (typeof error === 'object' && error !== null && 'code' in error) {
+      return (error as { code?: string }).code === 'ENOENT';
+    }
+
+    const message = error instanceof Error ? error.message : String(error);
+    return message.toLowerCase().includes('not found');
   }
 }

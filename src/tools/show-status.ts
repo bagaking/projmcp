@@ -13,10 +13,14 @@ export class ShowStatusTool {
         }]
       };
     } catch (error) {
+      const errorMessage = this.isNotFoundError(error)
+        ? 'CURRENT.md not found. Please run init_project_plan first.'
+        : `Error reading CURRENT.md: ${error instanceof Error ? error.message : 'Unknown error'}`;
+
       return {
         content: [{
           type: 'text' as const,
-          text: 'CURRENT.md not found. Please run init_project_plan first.'
+          text: errorMessage
         }]
       };
     }
@@ -32,12 +36,25 @@ export class ShowStatusTool {
         }]
       };
     } catch (error) {
+      const errorMessage = this.isNotFoundError(error)
+        ? 'PLAN.md not found. Please run init_project_plan first.'
+        : `Error reading PLAN.md: ${error instanceof Error ? error.message : 'Unknown error'}`;
+
       return {
         content: [{
           type: 'text' as const,
-          text: 'PLAN.md not found. Please run init_project_plan first.'
+          text: errorMessage
         }]
       };
     }
+  }
+
+  private isNotFoundError(error: unknown): boolean {
+    if (typeof error === 'object' && error !== null && 'code' in error) {
+      return (error as { code?: string }).code === 'ENOENT';
+    }
+
+    const message = error instanceof Error ? error.message : String(error);
+    return message.toLowerCase().includes('not found');
   }
 }

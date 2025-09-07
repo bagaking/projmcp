@@ -11,6 +11,9 @@ import { InitProjectTool } from '../dist/tools/init-project.js';
 import { ListFilesTool } from '../dist/tools/list-files.js';
 import { ProjectPlanMCPServer } from '../dist/services/mcp-server.js';
 import { QuerySprintTool } from '../dist/tools/query-sprint.js';
+import { ShowCurrentTool } from '../dist/tools/show-current.js';
+import { ShowPlanTool } from '../dist/tools/show-plan.js';
+import { ShowStatusTool } from '../dist/tools/show-status.js';
 import { FileManager } from '../dist/utils/file-manager.js';
 import { SecurityValidator, DEFAULT_SECURITY_CONFIG } from '../dist/utils/security-validator.js';
 import { TemplateGenerator } from '../dist/utils/template-generator.js';
@@ -200,6 +203,53 @@ test('file manager listFiles skips symlink entries inside project_plan', async (
       files.map((file) => file.name),
       ['DOCREF_001.target.md']
     );
+  });
+});
+
+test('file manager does not report symlinked core files as a valid project plan', async () => {
+  await withTempProject(async (baseDir) => {
+    const fileManager = new FileManager(baseDir);
+    const planDir = fileManager.getProjectPlanDir();
+
+    await fileManager.ensureProjectPlanDir();
+    await writeFile(join(planDir, 'PLAN.target.md'), 'plan content', 'utf-8');
+    await writeFile(join(planDir, 'CURRENT.target.md'), 'current content', 'utf-8');
+    await symlink(join(planDir, 'PLAN.target.md'), join(planDir, 'PLAN.md'));
+    await symlink(join(planDir, 'CURRENT.target.md'), join(planDir, 'CURRENT.md'));
+
+    assert.equal(await fileManager.hasValidProjectPlan(), false);
+    assert.equal((await fileManager.getProjectStatus()).hasProjectPlan, false);
+
+    const listedNames = (await fileManager.listFiles('all')).map((file) => file.name);
+    assert.equal(listedNames.includes('PLAN.md'), false);
+    assert.equal(listedNames.includes('CURRENT.md'), false);
+  });
+});
+
+test('show_current and show_plan preserve security errors instead of reporting not found', async () => {
+  await withTempProject(async (baseDir) => {
+    const fileManager = new FileManager(baseDir);
+    const planDir = fileManager.getProjectPlanDir();
+
+    await fileManager.ensureProjectPlanDir();
+    await writeFile(join(planDir, 'PLAN.target.md'), 'plan content', 'utf-8');
+    await writeFile(join(planDir, 'CURRENT.target.md'), 'current content', 'utf-8');
+    await symlink(join(planDir, 'PLAN.target.md'), join(planDir, 'PLAN.md'));
+    await symlink(join(planDir, 'CURRENT.target.md'), join(planDir, 'CURRENT.md'));
+
+    const currentResult = await new ShowCurrentTool(fileManager).execute({});
+    assert.equal(currentResult.isError, true);
+    assert.match(responseText(currentResult), new RegExp('SecurityValidation|symbolic link', 'i'));
+    assert.equal(responseText(currentResult).includes('not found'), false);
+
+    const planResult = await new ShowPlanTool(fileManager).execute({});
+    assert.equal(planResult.isError, true);
+    assert.match(responseText(planResult), new RegExp('SecurityValidation|symbolic link', 'i'));
+    assert.equal(responseText(planResult).includes('not found'), false);
+
+    const statusTool = new ShowStatusTool(fileManager);
+    assert.match(responseText(await statusTool.showCurrent()), new RegExp('SecurityValidation|symbolic link', 'i'));
+    assert.match(responseText(await statusTool.showPlan()), new RegExp('SecurityValidation|symbolic link', 'i'));
   });
 });
 

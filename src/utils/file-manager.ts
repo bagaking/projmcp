@@ -5,7 +5,7 @@
  */
 
 import { constants, promises as fs } from 'fs';
-import { join, resolve } from 'path';
+import { resolve } from 'path';
 import { FileInfo, FileType, FILE_PATTERNS, ProjectStatus } from '../types.js';
 import { IFileManager, ILogger } from '../interfaces/core-interfaces.js';
 import { SecurityValidator, DEFAULT_SECURITY_CONFIG } from './security-validator.js';
@@ -62,8 +62,8 @@ export class FileManager implements IFileManager {
       await this.securityValidator.validateTrustedBasePath();
       
       // Check for core files
-      const planExists = await this.fileExists(join(this.projectPlanDir, 'PLAN.md'));
-      const currentExists = await this.fileExists(join(this.projectPlanDir, 'CURRENT.md'));
+      const planExists = await this.isTrustedRegularFile('PLAN.md');
+      const currentExists = await this.isTrustedRegularFile('CURRENT.md');
       
       return planExists && currentExists;
     } catch (error) {
@@ -87,29 +87,23 @@ export class FileManager implements IFileManager {
     for (const file of files) {
       if (!file.endsWith('.md')) continue;
 
-      const filePath = join(this.projectPlanDir, file);
       const fileType = this.categorizeFile(file);
       
       // Apply type filter
       if (type !== 'all' && fileType !== type) continue;
 
       try {
-        const stats = await fs.lstat(filePath);
-        if (stats.isSymbolicLink() || !stats.isFile()) {
-          continue;
-        }
-
-        await this.securityValidator.validateExistingFilePath(file);
-        const content = await this.readRegularFileNoFollow(filePath);
+        const regularFile = await this.validateTrustedRegularFile(file);
+        const content = await this.readRegularFileNoFollow(regularFile.path);
         const lineCount = content.split('\n').length;
 
         fileInfos.push({
           name: file,
-          path: filePath,
+          path: regularFile.path,
           type: fileType,
           lineCount,
-          lastModified: stats.mtime.toISOString(),
-          size: stats.size,
+          lastModified: regularFile.stats.mtime.toISOString(),
+          size: regularFile.stats.size,
         });
       } catch (error) {
         console.warn(`Failed to read file ${file}:`, error);
@@ -168,18 +162,15 @@ export class FileManager implements IFileManager {
 
     try {
       // Enhanced security validation
-      const validatedPath = await this.securityValidator.validateExistingFilePath(filePath);
+      const regularFile = await this.validateTrustedRegularFile(filePath);
       
-      // Check if file exists before reading
-      await this.validateFileAccessibility(validatedPath);
-      
-      const content = await this.readRegularFileNoFollow(validatedPath);
+      const content = await this.readRegularFileNoFollow(regularFile.path);
       
       // Additional content validation for security
       this.securityValidator.validateFileContent(content, `file: ${filePath}`);
       
       this.logger.info('File read successfully', { 
-        filePath: validatedPath,
+        filePath: regularFile.path,
         contentLength: content.length 
       });
       
@@ -271,6 +262,39 @@ export class FileManager implements IFileManager {
     }
   }
 
+  private async validateTrustedRegularFile(filePath: string) {
+    const validatedPath = await this.securityValidator.validateExistingFilePath(filePath);
+    const stats = await fs.lstat(validatedPath);
+
+    if (stats.isSymbolicLink()) {
+      throw new Error('SecurityValidation: Refusing to read symbolic link target');
+    }
+
+    if (!stats.isFile()) {
+      throw new Error('SecurityValidation: Refusing to read non-file target');
+    }
+
+    await this.validateFileAccessibility(validatedPath);
+
+    return {
+      path: validatedPath,
+      stats,
+    };
+  }
+
+  private async isTrustedRegularFile(filePath: string): Promise<boolean> {
+    try {
+      await this.validateTrustedRegularFile(filePath);
+      return true;
+    } catch (error) {
+      if (this.isNotFoundError(error) || this.isSecurityValidationError(error)) {
+        return false;
+      }
+
+      throw error;
+    }
+  }
+
   private async validateWritableTarget(filePath: string): Promise<void> {
     try {
       const stats = await fs.lstat(filePath);
@@ -341,6 +365,10 @@ export class FileManager implements IFileManager {
       && error !== null
       && 'code' in error
       && (error as { code?: string }).code === 'ENOENT';
+  }
+
+  private isSecurityValidationError(error: unknown): boolean {
+    return error instanceof Error && error.message.startsWith('SecurityValidation:');
   }
 
   private assertNoFollowAvailable(): void {

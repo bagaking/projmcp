@@ -359,6 +359,7 @@ class ReleaseValidator {
         .filter(path =>
           forbiddenPrefixes.some(prefix => path.startsWith(prefix)) ||
           forbiddenFiles.includes(path) ||
+          path.startsWith('dist/direct-mcp-server.') ||
           path.startsWith('.eslintrc')
         );
 
