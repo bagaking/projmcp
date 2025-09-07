@@ -100,7 +100,7 @@ export class SecurityValidator {
 
   async validateExistingFilePath(filePath: string): Promise<string> {
     const resolvedPath = this.validateFilePath(filePath);
-    const trustedBasePath = await fs.realpath(this._trustedBasePath);
+    const trustedBasePath = await this.validateTrustedBasePath();
     const canonicalPath = await fs.realpath(resolvedPath);
 
     this.validateTrustedContainment(canonicalPath, trustedBasePath);
@@ -109,7 +109,7 @@ export class SecurityValidator {
 
   async validateWritableFilePath(filePath: string): Promise<string> {
     const resolvedPath = this.validateFilePath(filePath);
-    const trustedBasePath = await fs.realpath(this._trustedBasePath);
+    const trustedBasePath = await this.validateTrustedBasePath();
     const canonicalParentPath = await fs.realpath(dirname(resolvedPath));
 
     this.validateTrustedContainment(canonicalParentPath, trustedBasePath);
@@ -124,6 +124,20 @@ export class SecurityValidator {
     }
 
     return resolvedPath;
+  }
+
+  async validateTrustedBasePath(): Promise<string> {
+    const stats = await fs.lstat(this._trustedBasePath);
+
+    if (stats.isSymbolicLink()) {
+      throw new Error('SecurityValidation: Trusted base path must not be a symbolic link');
+    }
+
+    if (!stats.isDirectory()) {
+      throw new Error('SecurityValidation: Trusted base path must be a directory');
+    }
+
+    return fs.realpath(this._trustedBasePath);
   }
 
   /**

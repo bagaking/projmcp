@@ -237,6 +237,36 @@ test('file manager rejects symlink writes even when the target stays in project_
   });
 });
 
+test('file manager rejects a symlinked project_plan root', async () => {
+  await withTempProject(async (baseDir) => {
+    const outsideDir = join(baseDir, 'outside');
+    const outsideFile = join(outsideDir, 'PLAN.md');
+    const projectPlanLink = join(baseDir, 'project_plan');
+    const fileManager = new FileManager(baseDir);
+
+    await mkdir(outsideDir);
+    await writeFile(outsideFile, 'outside content', 'utf-8');
+    await symlink(outsideDir, projectPlanLink);
+
+    await assert.rejects(
+      () => fileManager.hasValidProjectPlan(),
+      new RegExp('symbolic link', 'i')
+    );
+    await assert.rejects(
+      () => fileManager.readFile('PLAN.md'),
+      new RegExp('symbolic link', 'i')
+    );
+    await assert.rejects(
+      () => fileManager.writeFile('PLAN.md', 'overwrite attempt'),
+      new RegExp('symbolic link', 'i')
+    );
+    await assert.rejects(
+      () => fileManager.listFiles('all'),
+      new RegExp('symbolic link', 'i')
+    );
+  });
+});
+
 test('security validator consistently rejects repeated malicious content checks', () => {
   const validator = new SecurityValidator(
     DEFAULT_SECURITY_CONFIG,

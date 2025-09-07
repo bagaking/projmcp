@@ -36,9 +36,14 @@ export class FileManager implements IFileManager {
    */
   async ensureProjectPlanDir(): Promise<void> {
     try {
-      await fs.access(this.projectPlanDir);
-    } catch {
+      await this.securityValidator.validateTrustedBasePath();
+    } catch (error) {
+      if (!this.isNotFoundError(error)) {
+        throw error;
+      }
+
       await fs.mkdir(this.projectPlanDir, { recursive: true });
+      await this.securityValidator.validateTrustedBasePath();
     }
   }
 
@@ -54,14 +59,18 @@ export class FileManager implements IFileManager {
    */
   async hasValidProjectPlan(): Promise<boolean> {
     try {
-      await fs.access(this.projectPlanDir);
+      await this.securityValidator.validateTrustedBasePath();
       
       // Check for core files
       const planExists = await this.fileExists(join(this.projectPlanDir, 'PLAN.md'));
       const currentExists = await this.fileExists(join(this.projectPlanDir, 'CURRENT.md'));
       
       return planExists && currentExists;
-    } catch {
+    } catch (error) {
+      if (!this.isNotFoundError(error)) {
+        throw error;
+      }
+
       return false;
     }
   }

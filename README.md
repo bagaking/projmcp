@@ -178,6 +178,7 @@ Implemented file boundary:
 - obvious active-content patterns such as script tags, `javascript:`, iframes,
   event-handler attributes, and `eval(` are rejected.
 - reads and writes use `O_NOFOLLOW` where available and reject symlink targets.
+- the `project_plan/` root itself is rejected when it is a symlink.
 - directory listings skip symlink and non-file entries.
 
 This does not make arbitrary user-provided Markdown trustworthy. Clients should
