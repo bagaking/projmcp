@@ -67,6 +67,39 @@ npx -y @bagaking/projmcp
 
 The package exposes the `bagaking-projmcp` binary for global installs.
 
+## MCP Smoke And Integration Check
+
+Use this path when you want to confirm the package, stdio server, and MCP tool
+surface are all wired correctly before publishing or adding the server to an
+agent client:
+
+```bash
+# From a fresh checkout
+npm ci
+npm test
+
+# Verify the compiled stdio server answers the MCP tools/list request
+LOG_LEVEL=error node dist/index.js <<'EOF'
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"projmcp-smoke","version":"0.0.0"}}}
+{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}
+{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+EOF
+
+# Check the package that npm would publish
+npm run release:dry-run
+```
+
+The `tools/list` response should include `list_files`, `show_current`,
+`show_plan`, `init_project_plan`, `record`, `query_sprint`, and `right_now` on
+stdout. Startup diagnostics should stay on stderr so they do not corrupt MCP
+stdio messages.
+
+For an installed-package smoke check, use the same JSON-RPC request with
+`npx -y @bagaking/projmcp` instead of `node dist/index.js`. For Claude Desktop
+or Claude Code, add the config from Quick Start, restart or reconnect the
+client, and confirm that the client can list the ProjMCP tools before invoking
+state-changing tools such as `init_project_plan` or `record`.
+
 ## MCP Tools
 
 The server provides these tools for AI agents:
