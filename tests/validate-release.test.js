@@ -51,6 +51,15 @@ test('parsePackageManifest skips leading JSON-looking noise arrays', () => {
   assert.deepEqual(parsePackageManifest(stdout), manifest);
 });
 
+test('parsePackageManifest skips leading files-shaped JSON noise without npm pack fields', () => {
+  const stdout = [
+    JSON.stringify([{ files: ['generated.log'] }]),
+    JSON.stringify([manifest])
+  ].join('\n');
+
+  assert.deepEqual(parsePackageManifest(stdout), manifest);
+});
+
 test('parsePackageManifest throws when output does not contain JSON', () => {
   assert.throws(
     () => parsePackageManifest('build finished without npm pack output'),

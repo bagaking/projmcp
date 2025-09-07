@@ -23,14 +23,19 @@ const OPTIONAL_FILES = [
 
 export function parsePackageManifest(stdout) {
   let foundJsonArray = false;
+  let packageManifest = null;
 
   for (const manifestList of parseJsonArrays(stdout)) {
     foundJsonArray = true;
     const manifest = manifestList[0];
 
-    if (manifest && Array.isArray(manifest.files)) {
-      return manifest;
+    if (isNpmPackManifest(manifest)) {
+      packageManifest = manifest;
     }
+  }
+
+  if (packageManifest) {
+    return packageManifest;
   }
 
   if (foundJsonArray) {
@@ -38,6 +43,23 @@ export function parsePackageManifest(stdout) {
   }
 
   throw new Error('npm pack did not return a JSON manifest');
+}
+
+function isNpmPackManifest(manifest) {
+  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
+    return false;
+  }
+
+  if (typeof manifest.name !== 'string' || typeof manifest.version !== 'string') {
+    return false;
+  }
+
+  if (!Array.isArray(manifest.files)) {
+    return false;
+  }
+
+  return typeof manifest.filename === 'string'
+    || manifest.files.some(file => file && typeof file.path === 'string');
 }
 
 function *parseJsonArrays(stdout) {
