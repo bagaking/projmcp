@@ -263,7 +263,7 @@ export class FileManager implements IFileManager {
   }
 
   private async validateTrustedRegularFile(filePath: string) {
-    const validatedPath = await this.securityValidator.validateExistingFilePath(filePath);
+    const validatedPath = this.securityValidator.validateFilePath(filePath);
     const stats = await fs.lstat(validatedPath);
 
     if (stats.isSymbolicLink()) {
@@ -274,6 +274,7 @@ export class FileManager implements IFileManager {
       throw new Error('SecurityValidation: Refusing to read non-file target');
     }
 
+    await this.securityValidator.validateResolvedPathContainment(validatedPath);
     await this.validateFileAccessibility(validatedPath);
 
     return {

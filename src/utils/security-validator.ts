@@ -107,6 +107,13 @@ export class SecurityValidator {
     return resolvedPath;
   }
 
+  async validateResolvedPathContainment(resolvedPath: string): Promise<void> {
+    const trustedBasePath = await this.validateTrustedBasePath();
+    const canonicalPath = await fs.realpath(resolvedPath);
+
+    this.validateTrustedContainment(canonicalPath, trustedBasePath);
+  }
+
   async validateWritableFilePath(filePath: string): Promise<string> {
     const resolvedPath = this.validateFilePath(filePath);
     const trustedBasePath = await this.validateTrustedBasePath();

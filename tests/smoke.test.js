@@ -147,7 +147,7 @@ test('file manager rejects symlink read escapes from project_plan', async () => 
 
     await assert.rejects(
       () => fileManager.readFile('LINK.md'),
-      new RegExp('path traversal', 'i')
+      new RegExp('symbolic link', 'i')
     );
   });
 });
@@ -248,8 +248,61 @@ test('show_current and show_plan preserve security errors instead of reporting n
     assert.equal(responseText(planResult).includes('not found'), false);
 
     const statusTool = new ShowStatusTool(fileManager);
-    assert.match(responseText(await statusTool.showCurrent()), new RegExp('SecurityValidation|symbolic link', 'i'));
-    assert.match(responseText(await statusTool.showPlan()), new RegExp('SecurityValidation|symbolic link', 'i'));
+    const statusCurrentText = responseText(await statusTool.showCurrent());
+    assert.match(statusCurrentText, new RegExp('SecurityValidation|symbolic link', 'i'));
+    assert.equal(statusCurrentText.includes('not found'), false);
+
+    const statusPlanText = responseText(await statusTool.showPlan());
+    assert.match(statusPlanText, new RegExp('SecurityValidation|symbolic link', 'i'));
+    assert.equal(statusPlanText.includes('not found'), false);
+  });
+});
+
+test('broken symlinks are security rejections for core and non-core files', async () => {
+  await withTempProject(async (baseDir) => {
+    const fileManager = new FileManager(baseDir);
+    const planDir = fileManager.getProjectPlanDir();
+
+    await fileManager.ensureProjectPlanDir();
+    await symlink(join(planDir, 'missing-plan.md'), join(planDir, 'PLAN.md'));
+    await symlink(join(planDir, 'missing-current.md'), join(planDir, 'CURRENT.md'));
+    await symlink(join(planDir, 'missing-link.md'), join(planDir, 'LINK.md'));
+
+    assert.equal(await fileManager.hasValidProjectPlan(), false);
+    assert.equal((await fileManager.getProjectStatus()).hasProjectPlan, false);
+
+    const listedNames = (await fileManager.listFiles('all')).map((file) => file.name);
+    assert.equal(listedNames.includes('PLAN.md'), false);
+    assert.equal(listedNames.includes('CURRENT.md'), false);
+    assert.equal(listedNames.includes('LINK.md'), false);
+
+    for (const fileName of ['PLAN.md', 'CURRENT.md', 'LINK.md']) {
+      await assert.rejects(
+        () => fileManager.readFile(fileName),
+        new RegExp('SecurityValidation|symbolic link', 'i')
+      );
+    }
+
+    const currentResult = await new ShowCurrentTool(fileManager).execute({});
+    const currentText = responseText(currentResult);
+    assert.equal(currentResult.isError, true);
+    assert.match(currentText, new RegExp('SecurityValidation|symbolic link', 'i'));
+    assert.equal(currentText.includes('not found'), false);
+
+    const planResult = await new ShowPlanTool(fileManager).execute({});
+    const planText = responseText(planResult);
+    assert.equal(planResult.isError, true);
+    assert.match(planText, new RegExp('SecurityValidation|symbolic link', 'i'));
+    assert.equal(planText.includes('not found'), false);
+
+    const statusTool = new ShowStatusTool(fileManager);
+    const statusCurrentText = responseText(await statusTool.showCurrent());
+    assert.match(statusCurrentText, new RegExp('SecurityValidation|symbolic link', 'i'));
+    assert.equal(statusCurrentText.includes('not found'), false);
+
+    const statusPlanText = responseText(await statusTool.showPlan());
+    assert.match(statusPlanText, new RegExp('SecurityValidation|symbolic link', 'i'));
+    assert.equal(statusPlanText.includes('not found'), false);
   });
 });
 
