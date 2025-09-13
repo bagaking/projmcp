@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
-import { parsePackageManifest } from '../scripts/validate-release.js';
+import {
+  getReleaseEntryPoints,
+  parsePackageManifest,
+  validateEntryPointFile
+} from '../scripts/validate-release.js';
 
 const manifest = {
   id: 'example-package@0.3.11',
@@ -80,3 +87,106 @@ test('parsePackageManifest throws when JSON is not a package manifest', () => {
     new RegExp('npm pack manifest did not include file entries')
   );
 });
+
+test('getReleaseEntryPoints covers package main and bin entries', () => {
+  assert.deepEqual(
+    getReleaseEntryPoints({
+      main: './dist/index.js',
+      bin: {
+        'example-package': 'dist/index.js',
+        'example-helper': './dist/helper.js'
+      }
+    }),
+    [
+      {
+        path: 'dist/index.js',
+        sources: ['package main', 'package bin example-package', 'required release entry']
+      },
+      {
+        path: 'dist/helper.js',
+        sources: ['package bin example-helper']
+      }
+    ]
+  );
+});
+
+test('getReleaseEntryPoints covers string package bin entries', () => {
+  assert.deepEqual(
+    getReleaseEntryPoints({
+      main: 'dist/main.js',
+      bin: './dist/cli.js'
+    }),
+    [
+      {
+        path: 'dist/main.js',
+        sources: ['package main']
+      },
+      {
+        path: 'dist/cli.js',
+        sources: ['package bin']
+      },
+      {
+        path: 'dist/index.js',
+        sources: ['required release entry']
+      }
+    ]
+  );
+});
+
+test('validateEntryPointFile stats, reads, and syntax-checks a valid entry point', () => {
+  const fixtureDir = makeFixtureDir('valid-entry-');
+  writeFileSync(join(fixtureDir, 'entry.js'), 'const answer = 42;\n');
+
+  assert.deepEqual(
+    validateEntryPointFile('entry.js', fixtureDir),
+    {
+      size: 19
+    }
+  );
+});
+
+test('validateEntryPointFile rejects a missing entry point', () => {
+  const fixtureDir = makeFixtureDir('missing-entry-');
+
+  assert.throws(
+    () => validateEntryPointFile('entry.js', fixtureDir),
+    new RegExp('file does not exist')
+  );
+});
+
+test('validateEntryPointFile rejects directories as entry points', () => {
+  const fixtureDir = makeFixtureDir('directory-entry-');
+  mkdirSync(join(fixtureDir, 'entry.js'));
+
+  assert.throws(
+    () => validateEntryPointFile('entry.js', fixtureDir),
+    new RegExp('path is not a file')
+  );
+});
+
+test('validateEntryPointFile rejects empty entry points', () => {
+  const fixtureDir = makeFixtureDir('empty-entry-');
+  writeFileSync(join(fixtureDir, 'entry.js'), '  \n');
+
+  assert.throws(
+    () => validateEntryPointFile('entry.js', fixtureDir),
+    new RegExp('file is empty')
+  );
+});
+
+test('validateEntryPointFile rejects syntax-invalid entry points', () => {
+  const fixtureDir = makeFixtureDir('invalid-entry-');
+  writeFileSync(join(fixtureDir, 'entry.js'), 'const broken = ;\n');
+
+  assert.throws(
+    () => validateEntryPointFile('entry.js', fixtureDir),
+    new RegExp('node --check failed')
+  );
+});
+
+function makeFixtureDir(prefix) {
+  const fixtureDir = join(tmpdir(), `validate-release-${prefix}${process.pid}-${Date.now()}`);
+  rmSync(fixtureDir, { recursive: true, force: true });
+  mkdirSync(fixtureDir, { recursive: true });
+  return fixtureDir;
+}

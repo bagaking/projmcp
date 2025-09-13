@@ -5,7 +5,7 @@
  * Ensures code quality, build integrity, and package readiness before publishing
  */
 
-import { execSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import { existsSync, readFileSync, statSync } from 'fs';
 import { resolve } from 'path';
 import { pathToFileURL } from 'node:url';
@@ -19,6 +19,13 @@ const REQUIRED_FILES = [
 const OPTIONAL_FILES = [
   'LICENSE',
   'CHANGELOG.md'
+];
+
+const REQUIRED_ENTRY_POINTS = [
+  {
+    source: 'required release entry',
+    path: 'dist/index.js'
+  }
 ];
 
 export function parsePackageManifest(stdout) {
@@ -43,6 +50,107 @@ export function parsePackageManifest(stdout) {
   }
 
   throw new Error('npm pack did not return a JSON manifest');
+}
+
+export function normalizePackagePath(file) {
+  return file.startsWith('./') ? file.slice(2) : file;
+}
+
+export function collectPackageEntryPoints(pkg) {
+  const entryPoints = [];
+
+  if (typeof pkg.main === 'string' && pkg.main.length > 0) {
+    entryPoints.push({
+      source: 'package main',
+      path: pkg.main
+    });
+  }
+
+  if (typeof pkg.bin === 'string' && pkg.bin.length > 0) {
+    entryPoints.push({
+      source: 'package bin',
+      path: pkg.bin
+    });
+  } else if (pkg.bin && typeof pkg.bin === 'object' && !Array.isArray(pkg.bin)) {
+    for (const [name, binPath] of Object.entries(pkg.bin)) {
+      if (typeof binPath === 'string' && binPath.length > 0) {
+        entryPoints.push({
+          source: `package bin ${name}`,
+          path: binPath
+        });
+      }
+    }
+  }
+
+  return entryPoints;
+}
+
+export function getReleaseEntryPoints(pkg) {
+  const entryPointUses = new Map();
+
+  for (const entryPoint of [
+    ...collectPackageEntryPoints(pkg),
+    ...REQUIRED_ENTRY_POINTS
+  ]) {
+    const entryPath = normalizePackagePath(entryPoint.path);
+    const entryPointUse = entryPointUses.get(entryPath) ?? {
+      path: entryPath,
+      sources: []
+    };
+
+    entryPointUse.sources.push(entryPoint.source);
+    entryPointUses.set(entryPath, entryPointUse);
+  }
+
+  return [...entryPointUses.values()];
+}
+
+export function validateEntryPointFile(entryPoint, cwd = process.cwd()) {
+  const fullPath = resolve(cwd, entryPoint);
+  let stats;
+
+  try {
+    stats = statSync(fullPath);
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      throw new Error('file does not exist');
+    }
+    throw new Error(`could not stat file: ${error.message}`);
+  }
+
+  if (!stats.isFile()) {
+    throw new Error('path is not a file');
+  }
+
+  let contents;
+  try {
+    contents = readFileSync(fullPath, 'utf8');
+  } catch (error) {
+    throw new Error(`could not read file: ${error.message}`);
+  }
+
+  if (contents.trim().length === 0) {
+    throw new Error('file is empty');
+  }
+
+  try {
+    execFileSync(process.execPath, ['--check', fullPath], {
+      cwd,
+      encoding: 'utf8',
+      stdio: 'pipe'
+    });
+  } catch (error) {
+    const output = [error.stdout, error.stderr]
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+
+    throw new Error(`node --check failed${output ? `: ${output}` : ''}`);
+  }
+
+  return {
+    size: stats.size
+  };
 }
 
 function isNpmPackManifest(manifest) {
@@ -280,20 +388,19 @@ class ReleaseValidator {
    */
   async validateEntryPoints() {
     console.log('\n🚀 Validating entry points...');
-    
-    const entryPoints = [
-      'dist/index.js'
-    ];
+
+    const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+    const entryPoints = getReleaseEntryPoints(pkg);
 
     for (const entryPoint of entryPoints) {
-      if (existsSync(entryPoint)) {
-        try {
-          // Basic syntax validation by attempting to require
-          const fullPath = resolve(entryPoint);
-          console.log(`  ✅ ${entryPoint} - syntax valid`);
-        } catch (error) {
-          this.errors.push(`Entry point ${entryPoint} has syntax errors: ${error.message}`);
-        }
+      const sourceLabel = entryPoint.sources.join(', ');
+
+      try {
+        const result = validateEntryPointFile(entryPoint.path);
+        const sizeKb = Math.round(result.size / 1024 * 100) / 100;
+        console.log(`  ✅ ${entryPoint.path} (${sourceLabel}) - file readable, syntax valid (${sizeKb} KB)`);
+      } catch (error) {
+        this.errors.push(`Entry point ${entryPoint.path} (${sourceLabel}) failed validation: ${error.message}`);
       }
     }
   }
@@ -329,7 +436,6 @@ class ReleaseValidator {
       const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
       const manifest = this.getPackageManifest();
       const packedFiles = new Set(manifest.files.map(file => file.path));
-      const normalizePackagePath = file => file.startsWith('./') ? file.slice(2) : file;
       const requiredPackageFiles = new Set([
         'package.json',
         'README.md',
