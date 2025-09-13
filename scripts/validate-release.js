@@ -253,6 +253,10 @@ export async function runMcpJsonRpcSmoke(command, options = {}) {
       if (error) {
         rejectPromise(failWithContext(error));
       } else {
+        if (stdoutBuffer.length > 0) {
+          rejectPromise(failWithContext(new Error(`stdout ended with incomplete JSON-RPC output: ${stdoutBuffer}`)));
+          return;
+        }
         resolvePromise(result);
       }
     }

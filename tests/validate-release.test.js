@@ -319,6 +319,66 @@ function handleMessage(message) {
   assert.equal(response.result.seenToolsList, 1);
 });
 
+test('runMcpJsonRpcSmoke rejects trailing stdout without a JSON-RPC newline', async () => {
+  const fixtureDir = makeFixtureDir('jsonrpc-trailing-stdout-');
+  const serverPath = join(fixtureDir, 'server.mjs');
+
+  writeFileSync(serverPath, `
+let buffer = '';
+
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', chunk => {
+  buffer += chunk;
+  let newlineIndex = buffer.indexOf('\\n');
+
+  while (newlineIndex !== -1) {
+    const line = buffer.slice(0, newlineIndex);
+    buffer = buffer.slice(newlineIndex + 1);
+
+    if (line.length > 0) {
+      handleMessage(JSON.parse(line));
+    }
+
+    newlineIndex = buffer.indexOf('\\n');
+  }
+});
+
+function writeMessage(message) {
+  process.stdout.write(JSON.stringify(message) + '\\n');
+}
+
+function handleMessage(message) {
+  if (message.id === 1) {
+    writeMessage({ jsonrpc: '2.0', id: 1, result: { capabilities: {} } });
+    return;
+  }
+
+  if (message.id === 2 && message.method === 'tools/list') {
+    writeMessage({
+      jsonrpc: '2.0',
+      id: 2,
+      result: {
+        tools: [
+          { name: 'list_files' },
+          { name: 'init_project_plan' }
+        ]
+      }
+    });
+    process.stdout.write('server started');
+  }
+}
+`);
+
+  await assert.rejects(
+    runMcpJsonRpcSmoke(process.execPath, {
+      args: [serverPath],
+      cwd: fixtureDir,
+      timeoutMs: 5000
+    }),
+    new RegExp('incomplete JSON-RPC output')
+  );
+});
+
 test('selectPackageBinName returns string and object bin names', () => {
   assert.equal(
     selectPackageBinName({
