@@ -35,6 +35,15 @@ const PACKED_SMOKE_TIMEOUT_MS = 15000;
 const INSTALL_TIMEOUT_MS = 120000;
 const PACK_TIMEOUT_MS = 60000;
 const TYPE_RESOLUTION_TIMEOUT_MS = 30000;
+export const EXPECTED_MCP_TOOL_NAMES = [
+  'list_files',
+  'show_current',
+  'show_plan',
+  'init_project_plan',
+  'record',
+  'query_sprint',
+  'right_now'
+];
 const CHILD_NPM_ENV = {
   ...process.env,
   npm_config_dry_run: 'false'
@@ -298,7 +307,7 @@ export async function runMcpJsonRpcSmoke(command, options = {}) {
     cwd = process.cwd(),
     env = {},
     timeoutMs = PACKED_SMOKE_TIMEOUT_MS,
-    expectedToolNames = ['list_files', 'init_project_plan']
+    expectedToolNames = EXPECTED_MCP_TOOL_NAMES
   } = options;
 
   return new Promise((resolvePromise, rejectPromise) => {

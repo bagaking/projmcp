@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
 import {
   collectToolNamesFromListResponse,
+  EXPECTED_MCP_TOOL_NAMES,
   getReleaseEntryPoints,
   parsePackageManifest,
   parseJsonRpcStdoutLine,
@@ -28,6 +29,13 @@ const manifest = {
     }
   ]
 };
+
+test('release smoke expected tools match the README JSON-RPC smoke surface', () => {
+  assert.deepEqual(
+    EXPECTED_MCP_TOOL_NAMES,
+    getReadmeJsonRpcSmokeTools()
+  );
+});
 
 test('parsePackageManifest parses pure npm pack JSON output', () => {
   assert.deepEqual(parsePackageManifest(JSON.stringify([manifest])), manifest);
@@ -294,10 +302,7 @@ function handleMessage(message) {
         id: 2,
         result: {
           seenToolsList: toolsListCount,
-          tools: [
-            { name: 'list_files' },
-            { name: 'init_project_plan' }
-          ]
+          tools: ${toolListLiteral()}
         }
       });
     }, 50);
@@ -317,6 +322,62 @@ function handleMessage(message) {
     .find(message => message.id === 2);
 
   assert.equal(response.result.seenToolsList, 1);
+});
+
+test('runMcpJsonRpcSmoke rejects servers missing default release tools', async () => {
+  const fixtureDir = makeFixtureDir('jsonrpc-missing-release-tool-');
+  const serverPath = join(fixtureDir, 'server.mjs');
+
+  writeFileSync(serverPath, `
+let buffer = '';
+
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', chunk => {
+  buffer += chunk;
+  let newlineIndex = buffer.indexOf('\\n');
+
+  while (newlineIndex !== -1) {
+    const line = buffer.slice(0, newlineIndex);
+    buffer = buffer.slice(newlineIndex + 1);
+
+    if (line.length > 0) {
+      handleMessage(JSON.parse(line));
+    }
+
+    newlineIndex = buffer.indexOf('\\n');
+  }
+});
+
+function writeMessage(message) {
+  process.stdout.write(JSON.stringify(message) + '\\n');
+}
+
+function handleMessage(message) {
+  if (message.id === 1) {
+    writeMessage({ jsonrpc: '2.0', id: 1, result: { capabilities: {} } });
+    return;
+  }
+
+  if (message.id === 2 && message.method === 'tools/list') {
+    writeMessage({
+      jsonrpc: '2.0',
+      id: 2,
+      result: {
+        tools: ${toolListLiteral(EXPECTED_MCP_TOOL_NAMES.filter(name => name !== 'right_now'))}
+      }
+    });
+  }
+}
+`);
+
+  await assert.rejects(
+    runMcpJsonRpcSmoke(process.execPath, {
+      args: [serverPath],
+      cwd: fixtureDir,
+      timeoutMs: 5000
+    }),
+    new RegExp('tools/list missing expected tools: right_now')
+  );
 });
 
 test('runMcpJsonRpcSmoke rejects trailing stdout without a JSON-RPC newline', async () => {
@@ -358,10 +419,7 @@ function handleMessage(message) {
       jsonrpc: '2.0',
       id: 2,
       result: {
-        tools: [
-          { name: 'list_files' },
-          { name: 'init_project_plan' }
-        ]
+        tools: ${toolListLiteral()}
       }
     });
     process.stdout.write('server started');
@@ -405,6 +463,21 @@ test('selectPackageBinName rejects packages without bin entries', () => {
     new RegExp('does not define a bin entry')
   );
 });
+
+function toolListLiteral(toolNames = EXPECTED_MCP_TOOL_NAMES) {
+  return JSON.stringify(toolNames.map(name => ({ name })), null, 10);
+}
+
+function getReadmeJsonRpcSmokeTools() {
+  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const smokeSectionPattern = new RegExp('## JSON-RPC Smoke([\\s\\S]*?)(?:\\n## |\\n$)');
+  const toolListPattern = new RegExp('- the tool names include ([\\s\\S]*?)\\n-');
+  const toolNamePattern = new RegExp('`([^`]+)`', 'g');
+  const smokeSection = readme.match(smokeSectionPattern)?.[1] ?? '';
+  const toolListText = smokeSection.match(toolListPattern)?.[1] ?? '';
+
+  return [...toolListText.matchAll(toolNamePattern)].map(match => match[1]);
+}
 
 function makeFixtureDir(prefix) {
   const fixtureDir = join(tmpdir(), `validate-release-${prefix}${process.pid}-${Date.now()}`);
