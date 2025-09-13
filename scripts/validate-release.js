@@ -5,9 +5,10 @@
  * Ensures code quality, build integrity, and package readiness before publishing
  */
 
-import { execFileSync, execSync } from 'child_process';
-import { existsSync, readFileSync, statSync } from 'fs';
-import { resolve } from 'path';
+import { execFileSync, execSync, spawn } from 'child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { basename, isAbsolute, join, resolve } from 'path';
 import { pathToFileURL } from 'node:url';
 
 const REQUIRED_FILES = [
@@ -27,6 +28,15 @@ const REQUIRED_ENTRY_POINTS = [
     path: 'dist/index.js'
   }
 ];
+
+const NPM_COMMAND = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const PACKED_SMOKE_TIMEOUT_MS = 15000;
+const INSTALL_TIMEOUT_MS = 120000;
+const PACK_TIMEOUT_MS = 60000;
+const CHILD_NPM_ENV = {
+  ...process.env,
+  npm_config_dry_run: 'false'
+};
 
 export function parsePackageManifest(stdout) {
   let foundJsonArray = false;
@@ -153,6 +163,300 @@ export function validateEntryPointFile(entryPoint, cwd = process.cwd()) {
   };
 }
 
+export function parseJsonRpcStdoutLine(line) {
+  let message;
+
+  try {
+    message = JSON.parse(line);
+  } catch {
+    throw new Error(`stdout contained non-JSON-RPC output: ${line}`);
+  }
+
+  if (!message || typeof message !== 'object' || Array.isArray(message)) {
+    throw new Error(`stdout contained non-object JSON-RPC output: ${line}`);
+  }
+
+  if (message.jsonrpc !== '2.0') {
+    throw new Error(`stdout contained JSON without jsonrpc 2.0 marker: ${line}`);
+  }
+
+  return message;
+}
+
+export function collectToolNamesFromListResponse(message) {
+  if (!message || typeof message !== 'object' || message.error) {
+    throw new Error(`tools/list returned an error: ${JSON.stringify(message?.error ?? message)}`);
+  }
+
+  const tools = message.result?.tools;
+  if (!Array.isArray(tools)) {
+    throw new Error('tools/list response did not include a tools array');
+  }
+
+  return tools.map(tool => tool?.name).filter(name => typeof name === 'string');
+}
+
+export async function runMcpJsonRpcSmoke(command, options = {}) {
+  const {
+    args = [],
+    cwd = process.cwd(),
+    env = {},
+    timeoutMs = PACKED_SMOKE_TIMEOUT_MS,
+    expectedToolNames = ['list_files', 'init_project_plan']
+  } = options;
+
+  return new Promise((resolvePromise, rejectPromise) => {
+    const child = spawn(command, args, {
+      cwd,
+      env: {
+        ...process.env,
+        LOG_LEVEL: 'error',
+        ...env
+      },
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+
+    const responses = new Map();
+    let stdout = '';
+    let stderr = '';
+    let stdoutBuffer = '';
+    let completed = false;
+
+    const timeout = setTimeout(() => {
+      finish(new Error(`MCP JSON-RPC smoke timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    function send(message) {
+      child.stdin.write(`${JSON.stringify(message)}\n`);
+    }
+
+    function failWithContext(error) {
+      const details = stderr.trim() ? `\nstderr:\n${stderr.trim()}` : '';
+      return new Error(`${error.message}${details}`);
+    }
+
+    async function finish(error, result) {
+      if (completed) {
+        return;
+      }
+
+      completed = true;
+      clearTimeout(timeout);
+
+      if (child.stdin) {
+        child.stdin.end();
+      }
+
+      await terminateChild(child);
+
+      if (error) {
+        rejectPromise(failWithContext(error));
+      } else {
+        resolvePromise(result);
+      }
+    }
+
+    function handleMessage(message) {
+      if (message.id !== undefined) {
+        responses.set(message.id, message);
+      }
+
+      if (responses.has(1) && !responses.has(2)) {
+        const initializeResponse = responses.get(1);
+        if (initializeResponse.error) {
+          finish(new Error(`initialize returned an error: ${JSON.stringify(initializeResponse.error)}`));
+          return;
+        }
+
+        send({
+          jsonrpc: '2.0',
+          method: 'notifications/initialized',
+          params: {}
+        });
+        send({
+          jsonrpc: '2.0',
+          id: 2,
+          method: 'tools/list',
+          params: {}
+        });
+      }
+
+      if (responses.has(1) && responses.has(2)) {
+        try {
+          const toolNames = collectToolNamesFromListResponse(responses.get(2));
+          const missingToolNames = expectedToolNames.filter(name => !toolNames.includes(name));
+
+          if (missingToolNames.length > 0) {
+            throw new Error(`tools/list missing expected tools: ${missingToolNames.join(', ')}`);
+          }
+
+          finish(null, { toolNames, stdout, stderr });
+        } catch (error) {
+          finish(error);
+        }
+      }
+    }
+
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk;
+      stdoutBuffer += chunk;
+
+      let newlineIndex = stdoutBuffer.indexOf('\n');
+      while (newlineIndex !== -1) {
+        const line = stdoutBuffer.slice(0, newlineIndex).replace(new RegExp('\\r$'), '');
+        stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+
+        if (line.length > 0) {
+          try {
+            handleMessage(parseJsonRpcStdoutLine(line));
+          } catch (error) {
+            finish(error);
+            return;
+          }
+        }
+
+        newlineIndex = stdoutBuffer.indexOf('\n');
+      }
+    });
+
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+
+    child.on('spawn', () => {
+      send({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2025-06-18',
+          capabilities: {},
+          clientInfo: {
+            name: 'release-smoke',
+            version: '0.0.0'
+          }
+        }
+      });
+    });
+
+    child.on('error', (error) => {
+      finish(error);
+    });
+
+    child.on('close', (code, signal) => {
+      if (!completed) {
+        finish(new Error(`MCP JSON-RPC smoke process exited before completing: code=${code}, signal=${signal}`));
+      }
+    });
+  });
+}
+
+export async function runPackedTarballMcpSmoke(packageRoot = process.cwd()) {
+  const tempDir = mkdtempSync(join(tmpdir(), 'projmcp-release-smoke-'));
+
+  try {
+    const packDir = join(tempDir, 'pack');
+    const installDir = join(tempDir, 'install');
+    mkdirSync(packDir, { recursive: true });
+    mkdirSync(installDir, { recursive: true });
+    writeFileSync(join(installDir, 'package.json'), '{"private":true,"type":"module"}\n');
+
+    const packStdout = execFileSync(NPM_COMMAND, ['pack', '--json', '--pack-destination', packDir], {
+      cwd: packageRoot,
+      env: CHILD_NPM_ENV,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: PACK_TIMEOUT_MS
+    });
+    const manifest = parsePackageManifest(packStdout);
+    const tarballPath = resolvePackedTarballPath(manifest.filename, packDir, packageRoot);
+
+    execFileSync(NPM_COMMAND, ['install', '--ignore-scripts', '--no-audit', '--no-fund', tarballPath], {
+      cwd: installDir,
+      env: CHILD_NPM_ENV,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: INSTALL_TIMEOUT_MS
+    });
+
+    const rootPackage = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'));
+    const installedPackageRoot = join(installDir, 'node_modules', ...rootPackage.name.split('/'));
+    const installedPackage = JSON.parse(readFileSync(join(installedPackageRoot, 'package.json'), 'utf8'));
+    const binName = selectPackageBinName(installedPackage);
+    const binCommand = join(installDir, 'node_modules', '.bin', process.platform === 'win32' ? `${binName}.cmd` : binName);
+    const smokeResult = await runMcpJsonRpcSmoke(binCommand, {
+      cwd: installDir,
+      timeoutMs: PACKED_SMOKE_TIMEOUT_MS
+    });
+
+    return {
+      filename: basename(tarballPath),
+      binName,
+      toolNames: smokeResult.toolNames
+    };
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+export function selectPackageBinName(pkg) {
+  if (typeof pkg.bin === 'string') {
+    return pkg.name;
+  }
+
+  if (pkg.bin && typeof pkg.bin === 'object' && !Array.isArray(pkg.bin)) {
+    const binNames = Object.keys(pkg.bin);
+    if (binNames.length > 0) {
+      return binNames[0];
+    }
+  }
+
+  throw new Error('package does not define a bin entry');
+}
+
+function resolvePackedTarballPath(filename, packDir, packageRoot) {
+  if (typeof filename !== 'string' || filename.length === 0) {
+    throw new Error('npm pack manifest did not include a tarball filename');
+  }
+
+  const candidates = [
+    isAbsolute(filename) ? filename : resolve(packDir, filename),
+    isAbsolute(filename) ? filename : resolve(packageRoot, filename),
+    join(packDir, basename(filename))
+  ];
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  throw new Error(`packed tarball not found for manifest filename: ${filename}`);
+}
+
+function terminateChild(child) {
+  return new Promise((resolveTerminate) => {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      resolveTerminate();
+      return;
+    }
+
+    const killTimer = setTimeout(() => {
+      child.kill('SIGKILL');
+    }, 1000);
+
+    child.once('close', () => {
+      clearTimeout(killTimer);
+      resolveTerminate();
+    });
+
+    child.kill('SIGTERM');
+  });
+}
+
 function isNpmPackManifest(manifest) {
   if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
     return false;
@@ -247,6 +551,7 @@ class ReleaseValidator {
       await this.validateEntryPoints();
       await this.checkPackageSize();
       await this.validatePublishedContents();
+      await this.validatePackedTarballSmoke();
       await this.validateNpmIgnore();
       
       this.printResults();
@@ -476,6 +781,18 @@ class ReleaseValidator {
       }
     } catch (error) {
       this.errors.push(`Could not validate published package contents: ${error.message}`);
+    }
+  }
+
+  async validatePackedTarballSmoke() {
+    console.log('\n🧪 Running packed tarball MCP smoke...');
+
+    try {
+      const result = await runPackedTarballMcpSmoke();
+      console.log(`  ✅ Installed ${result.filename} and ran ${result.binName}`);
+      console.log(`  ✅ initialize + tools/list returned tools: ${result.toolNames.join(', ')}`);
+    } catch (error) {
+      this.errors.push(`Packed tarball MCP smoke failed: ${error.message}`);
     }
   }
 

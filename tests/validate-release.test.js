@@ -5,8 +5,11 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import {
+  collectToolNamesFromListResponse,
   getReleaseEntryPoints,
   parsePackageManifest,
+  parseJsonRpcStdoutLine,
+  selectPackageBinName,
   validateEntryPointFile
 } from '../scripts/validate-release.js';
 
@@ -181,6 +184,95 @@ test('validateEntryPointFile rejects syntax-invalid entry points', () => {
   assert.throws(
     () => validateEntryPointFile('entry.js', fixtureDir),
     new RegExp('node --check failed')
+  );
+});
+
+test('parseJsonRpcStdoutLine accepts JSON-RPC stdout lines', () => {
+  assert.deepEqual(
+    parseJsonRpcStdoutLine('{"jsonrpc":"2.0","id":1,"result":{}}'),
+    {
+      jsonrpc: '2.0',
+      id: 1,
+      result: {}
+    }
+  );
+});
+
+test('parseJsonRpcStdoutLine rejects non-protocol stdout pollution', () => {
+  assert.throws(
+    () => parseJsonRpcStdoutLine('server started'),
+    new RegExp('non-JSON-RPC output')
+  );
+
+  assert.throws(
+    () => parseJsonRpcStdoutLine('{"message":"server started"}'),
+    new RegExp('jsonrpc 2.0 marker')
+  );
+});
+
+test('collectToolNamesFromListResponse extracts tool names', () => {
+  assert.deepEqual(
+    collectToolNamesFromListResponse({
+      jsonrpc: '2.0',
+      id: 2,
+      result: {
+        tools: [
+          { name: 'list_files' },
+          { name: 'init_project_plan' }
+        ]
+      }
+    }),
+    ['list_files', 'init_project_plan']
+  );
+});
+
+test('collectToolNamesFromListResponse rejects error or malformed responses', () => {
+  assert.throws(
+    () => collectToolNamesFromListResponse({
+      jsonrpc: '2.0',
+      id: 2,
+      error: {
+        code: -32603,
+        message: 'broken'
+      }
+    }),
+    new RegExp('returned an error')
+  );
+
+  assert.throws(
+    () => collectToolNamesFromListResponse({
+      jsonrpc: '2.0',
+      id: 2,
+      result: {}
+    }),
+    new RegExp('tools array')
+  );
+});
+
+test('selectPackageBinName returns string and object bin names', () => {
+  assert.equal(
+    selectPackageBinName({
+      name: 'example-package',
+      bin: 'dist/index.js'
+    }),
+    'example-package'
+  );
+
+  assert.equal(
+    selectPackageBinName({
+      name: '@scope/example-package',
+      bin: {
+        'example-bin': 'dist/index.js'
+      }
+    }),
+    'example-bin'
+  );
+});
+
+test('selectPackageBinName rejects packages without bin entries', () => {
+  assert.throws(
+    () => selectPackageBinName({ name: 'example-package' }),
+    new RegExp('does not define a bin entry')
   );
 });
 
