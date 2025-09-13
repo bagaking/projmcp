@@ -95,11 +95,53 @@ export function collectPackageEntryPoints(pkg) {
   return entryPoints;
 }
 
+export function collectPackageTypeEntries(pkg) {
+  const typeEntries = [];
+
+  if (typeof pkg.types === 'string' && pkg.types.length > 0) {
+    typeEntries.push({
+      source: 'package types',
+      path: pkg.types
+    });
+  }
+
+  if (typeof pkg.typings === 'string' && pkg.typings.length > 0) {
+    typeEntries.push({
+      source: 'package typings',
+      path: pkg.typings
+    });
+  }
+
+  for (const exportEntry of collectPackageExports(pkg.exports)) {
+    if (exportEntry.condition === 'types') {
+      typeEntries.push({
+        source: `package exports ${exportEntry.subpath} types`,
+        path: exportEntry.path
+      });
+    }
+  }
+
+  return typeEntries;
+}
+
+export function collectPackageRuntimeExports(pkg) {
+  return collectPackageExports(pkg.exports)
+    .filter(exportEntry =>
+      exportEntry.condition !== 'types' &&
+      isJavaScriptEntryPath(exportEntry.path)
+    )
+    .map(exportEntry => ({
+      source: `package exports ${exportEntry.subpath}${exportEntry.condition ? ` ${exportEntry.condition}` : ''}`,
+      path: exportEntry.path
+    }));
+}
+
 export function getReleaseEntryPoints(pkg) {
   const entryPointUses = new Map();
 
   for (const entryPoint of [
     ...collectPackageEntryPoints(pkg),
+    ...collectPackageRuntimeExports(pkg),
     ...REQUIRED_ENTRY_POINTS
   ]) {
     const entryPath = normalizePackagePath(entryPoint.path);
@@ -115,8 +157,74 @@ export function getReleaseEntryPoints(pkg) {
   return [...entryPointUses.values()];
 }
 
+export function getReleaseTypeEntries(pkg) {
+  const typeEntryUses = new Map();
+
+  for (const typeEntry of collectPackageTypeEntries(pkg)) {
+    const typePath = normalizePackagePath(typeEntry.path);
+    const typeEntryUse = typeEntryUses.get(typePath) ?? {
+      path: typePath,
+      sources: []
+    };
+
+    typeEntryUse.sources.push(typeEntry.source);
+    typeEntryUses.set(typePath, typeEntryUse);
+  }
+
+  return [...typeEntryUses.values()];
+}
+
+export function getRequiredPackageFiles(pkg) {
+  const requiredPackageFiles = new Set([
+    'package.json',
+    'README.md',
+    'LICENSE',
+    'CHANGELOG.md',
+    ...getReleaseEntryPoints(pkg).map(entryPoint => entryPoint.path),
+    ...getReleaseTypeEntries(pkg).map(typeEntry => typeEntry.path),
+    ...collectPackageExports(pkg.exports).map(exportEntry => exportEntry.path)
+  ].map(normalizePackagePath));
+
+  return [...requiredPackageFiles].sort();
+}
+
 export function validateEntryPointFile(entryPoint, cwd = process.cwd()) {
   const fullPath = resolve(cwd, entryPoint);
+  const { stats } = validateReadablePackageFile(fullPath);
+
+  try {
+    execFileSync(process.execPath, ['--check', fullPath], {
+      cwd,
+      encoding: 'utf8',
+      stdio: 'pipe'
+    });
+  } catch (error) {
+    const output = [error.stdout, error.stderr]
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+
+    throw new Error(`node --check failed${output ? `: ${output}` : ''}`);
+  }
+
+  return {
+    size: stats.size
+  };
+}
+
+export function validateTypeEntryFile(typeEntry, cwd = process.cwd()) {
+  const { stats } = validateReadablePackageFile(resolve(cwd, typeEntry));
+
+  if (!typeEntry.endsWith('.d.ts') && !typeEntry.endsWith('.d.mts') && !typeEntry.endsWith('.d.cts')) {
+    throw new Error('type entry is not a declaration file');
+  }
+
+  return {
+    size: stats.size
+  };
+}
+
+function validateReadablePackageFile(fullPath) {
   let stats;
 
   try {
@@ -143,23 +251,9 @@ export function validateEntryPointFile(entryPoint, cwd = process.cwd()) {
     throw new Error('file is empty');
   }
 
-  try {
-    execFileSync(process.execPath, ['--check', fullPath], {
-      cwd,
-      encoding: 'utf8',
-      stdio: 'pipe'
-    });
-  } catch (error) {
-    const output = [error.stdout, error.stderr]
-      .filter(Boolean)
-      .join('\n')
-      .trim();
-
-    throw new Error(`node --check failed${output ? `: ${output}` : ''}`);
-  }
-
   return {
-    size: stats.size
+    stats,
+    contents
   };
 }
 
@@ -480,6 +574,39 @@ function isNpmPackManifest(manifest) {
     || manifest.files.some(file => file && typeof file.path === 'string');
 }
 
+function collectPackageExports(exportsField) {
+  const exportEntries = [];
+
+  function visit(value, subpath, condition = '') {
+    if (typeof value === 'string' && value.length > 0) {
+      exportEntries.push({ subpath, condition, path: value });
+      return;
+    }
+
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return;
+    }
+
+    for (const [key, nestedValue] of Object.entries(value)) {
+      if (key.startsWith('.')) {
+        visit(nestedValue, key, '');
+      } else {
+        visit(nestedValue, subpath, key);
+      }
+    }
+  }
+
+  visit(exportsField, '.', '');
+  return exportEntries;
+}
+
+function isJavaScriptEntryPath(filePath) {
+  const normalizedPath = normalizePackagePath(filePath);
+  return normalizedPath.endsWith('.js') ||
+    normalizedPath.endsWith('.mjs') ||
+    normalizedPath.endsWith('.cjs');
+}
+
 function *parseJsonArrays(stdout) {
   for (let start = stdout.indexOf('['); start !== -1; start = stdout.indexOf('[', start + 1)) {
     const end = findJsonArrayEnd(stdout, start);
@@ -718,6 +845,7 @@ class ReleaseValidator {
 
     const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
     const entryPoints = getReleaseEntryPoints(pkg);
+    const typeEntries = getReleaseTypeEntries(pkg);
 
     for (const entryPoint of entryPoints) {
       const sourceLabel = entryPoint.sources.join(', ');
@@ -728,6 +856,18 @@ class ReleaseValidator {
         console.log(`  ✅ ${entryPoint.path} (${sourceLabel}) - file readable, syntax valid (${sizeKb} KB)`);
       } catch (error) {
         this.errors.push(`Entry point ${entryPoint.path} (${sourceLabel}) failed validation: ${error.message}`);
+      }
+    }
+
+    for (const typeEntry of typeEntries) {
+      const sourceLabel = typeEntry.sources.join(', ');
+
+      try {
+        const result = validateTypeEntryFile(typeEntry.path);
+        const sizeKb = Math.round(result.size / 1024 * 100) / 100;
+        console.log(`  ✅ ${typeEntry.path} (${sourceLabel}) - declaration file readable (${sizeKb} KB)`);
+      } catch (error) {
+        this.errors.push(`Type entry ${typeEntry.path} (${sourceLabel}) failed validation: ${error.message}`);
       }
     }
   }
@@ -763,18 +903,7 @@ class ReleaseValidator {
       const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
       const manifest = this.getPackageManifest();
       const packedFiles = new Set(manifest.files.map(file => file.path));
-      const requiredPackageFiles = new Set([
-        'package.json',
-        'README.md',
-        'LICENSE',
-        'CHANGELOG.md',
-        pkg.main
-      ].map(normalizePackagePath));
-
-      if (pkg.bin) {
-        const binEntries = typeof pkg.bin === 'string' ? [pkg.bin] : Object.values(pkg.bin);
-        binEntries.forEach(entry => requiredPackageFiles.add(normalizePackagePath(entry)));
-      }
+      const requiredPackageFiles = getRequiredPackageFiles(pkg);
 
       for (const file of requiredPackageFiles) {
         if (!packedFiles.has(file)) {
