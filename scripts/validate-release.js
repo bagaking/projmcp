@@ -221,6 +221,7 @@ export async function runMcpJsonRpcSmoke(command, options = {}) {
     let stderr = '';
     let stdoutBuffer = '';
     let completed = false;
+    let sentToolsList = false;
 
     const timeout = setTimeout(() => {
       finish(new Error(`MCP JSON-RPC smoke timed out after ${timeoutMs}ms`));
@@ -261,13 +262,14 @@ export async function runMcpJsonRpcSmoke(command, options = {}) {
         responses.set(message.id, message);
       }
 
-      if (responses.has(1) && !responses.has(2)) {
+      if (responses.has(1) && !sentToolsList) {
         const initializeResponse = responses.get(1);
         if (initializeResponse.error) {
           finish(new Error(`initialize returned an error: ${JSON.stringify(initializeResponse.error)}`));
           return;
         }
 
+        sentToolsList = true;
         send({
           jsonrpc: '2.0',
           method: 'notifications/initialized',
@@ -544,6 +546,7 @@ class ReleaseValidator {
     console.log('🔍 Starting release validation...\n');
 
     try {
+      await this.runBuild();
       await this.checkRequiredFiles();
       await this.validatePackageJson();
       await this.checkBuildOutput();
@@ -563,6 +566,21 @@ class ReleaseValidator {
     } catch (error) {
       console.error('❌ Validation failed with error:', error.message);
       process.exit(1);
+    }
+  }
+
+  async runBuild() {
+    console.log('🏗️  Building release output...');
+
+    try {
+      execFileSync(NPM_COMMAND, ['run', 'build'], {
+        stdio: 'inherit',
+        env: CHILD_NPM_ENV
+      });
+      this.packageManifest = null;
+      console.log('  ✅ Build completed');
+    } catch (error) {
+      this.errors.push('Build failed');
     }
   }
 

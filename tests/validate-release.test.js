@@ -9,6 +9,7 @@ import {
   getReleaseEntryPoints,
   parsePackageManifest,
   parseJsonRpcStdoutLine,
+  runMcpJsonRpcSmoke,
   selectPackageBinName,
   validateEntryPointFile
 } from '../scripts/validate-release.js';
@@ -247,6 +248,75 @@ test('collectToolNamesFromListResponse rejects error or malformed responses', ()
     }),
     new RegExp('tools array')
   );
+});
+
+test('runMcpJsonRpcSmoke sends tools/list once when server notifications arrive first', async () => {
+  const fixtureDir = makeFixtureDir('jsonrpc-notification-');
+  const serverPath = join(fixtureDir, 'server.mjs');
+
+  writeFileSync(serverPath, `
+let buffer = '';
+let toolsListCount = 0;
+
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', chunk => {
+  buffer += chunk;
+  let newlineIndex = buffer.indexOf('\\n');
+
+  while (newlineIndex !== -1) {
+    const line = buffer.slice(0, newlineIndex);
+    buffer = buffer.slice(newlineIndex + 1);
+
+    if (line.length > 0) {
+      handleMessage(JSON.parse(line));
+    }
+
+    newlineIndex = buffer.indexOf('\\n');
+  }
+});
+
+function writeMessage(message) {
+  process.stdout.write(JSON.stringify(message) + '\\n');
+}
+
+function handleMessage(message) {
+  if (message.id === 1) {
+    writeMessage({ jsonrpc: '2.0', id: 1, result: { capabilities: {} } });
+    writeMessage({ jsonrpc: '2.0', method: 'notifications/progress', params: { step: 'ready' } });
+    return;
+  }
+
+  if (message.id === 2 && message.method === 'tools/list') {
+    toolsListCount += 1;
+    setTimeout(() => {
+      writeMessage({
+        jsonrpc: '2.0',
+        id: 2,
+        result: {
+          seenToolsList: toolsListCount,
+          tools: [
+            { name: 'list_files' },
+            { name: 'init_project_plan' }
+          ]
+        }
+      });
+    }, 50);
+  }
+}
+`);
+
+  const result = await runMcpJsonRpcSmoke(process.execPath, {
+    args: [serverPath],
+    cwd: fixtureDir,
+    timeoutMs: 5000
+  });
+  const response = result.stdout
+    .trim()
+    .split('\n')
+    .map(line => JSON.parse(line))
+    .find(message => message.id === 2);
+
+  assert.equal(response.result.seenToolsList, 1);
 });
 
 test('selectPackageBinName returns string and object bin names', () => {

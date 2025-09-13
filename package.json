@@ -14,7 +14,7 @@
     "test": "npm run build && node --test tests/*.test.js",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
-    "clean": "rm -rf dist",
+    "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
     "prebuild": "npm run clean",
     "prepack": "npm run build",
     "prepublishOnly": "npm run validate-release",
@@ -26,7 +26,7 @@
     "release:patch": "npm run version:patch && npm run build && npm publish",
     "release:minor": "npm run version:minor && npm run build && npm publish",
     "release:major": "npm run version:major && npm run build && npm publish",
-    "release:dry-run": "npm run validate-release && npm publish --dry-run"
+    "release:dry-run": "npm publish --dry-run"
   },
   "keywords": [
     "mcp",
