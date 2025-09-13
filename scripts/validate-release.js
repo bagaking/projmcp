@@ -30,9 +30,11 @@ const REQUIRED_ENTRY_POINTS = [
 ];
 
 const NPM_COMMAND = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const TSC_COMMAND = process.platform === 'win32' ? 'tsc.cmd' : 'tsc';
 const PACKED_SMOKE_TIMEOUT_MS = 15000;
 const INSTALL_TIMEOUT_MS = 120000;
 const PACK_TIMEOUT_MS = 60000;
+const TYPE_RESOLUTION_TIMEOUT_MS = 30000;
 const CHILD_NPM_ENV = {
   ...process.env,
   npm_config_dry_run: 'false'
@@ -485,6 +487,31 @@ export async function runPackedTarballMcpSmoke(packageRoot = process.cwd()) {
     const rootPackage = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'));
     const installedPackageRoot = join(installDir, 'node_modules', ...rootPackage.name.split('/'));
     const installedPackage = JSON.parse(readFileSync(join(installedPackageRoot, 'package.json'), 'utf8'));
+
+    writeFileSync(join(installDir, 'type-resolution-smoke.ts'), `import type {} from '${installedPackage.name}';\n`);
+    writeFileSync(join(installDir, 'tsconfig.type-resolution.json'), `${JSON.stringify({
+      compilerOptions: {
+        target: 'ES2022',
+        module: 'NodeNext',
+        moduleResolution: 'NodeNext',
+        strict: true,
+        skipLibCheck: true,
+        noEmit: true,
+        types: []
+      },
+      include: ['type-resolution-smoke.ts']
+    }, null, 2)}\n`);
+    const tscPath = existsSync(join(packageRoot, 'node_modules', '.bin', TSC_COMMAND))
+      ? join(packageRoot, 'node_modules', '.bin', TSC_COMMAND)
+      : TSC_COMMAND;
+    execFileSync(tscPath, ['--noEmit', '--project', 'tsconfig.type-resolution.json'], {
+      cwd: installDir,
+      env: CHILD_NPM_ENV,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: TYPE_RESOLUTION_TIMEOUT_MS
+    });
+
     const binName = selectPackageBinName(installedPackage);
     const binCommand = join(installDir, 'node_modules', '.bin', process.platform === 'win32' ? `${binName}.cmd` : binName);
     const smokeResult = await runMcpJsonRpcSmoke(binCommand, {
@@ -760,6 +787,16 @@ class ReleaseValidator {
       this.errors.push(`Invalid version format: ${pkg.version}`);
     }
 
+    const exportSubpaths = pkg.exports && typeof pkg.exports === 'object' && !Array.isArray(pkg.exports)
+      ? Object.keys(pkg.exports).filter(key => key.startsWith('.'))
+      : [];
+    const unsupportedSubpaths = exportSubpaths.filter(subpath => subpath !== '.');
+    if (!exportSubpaths.includes('.') || unsupportedSubpaths.length > 0) {
+      this.errors.push('Package exports must expose only "." because this package publishes a root-only public API');
+    } else {
+      console.log('  ✅ public API exports: . (root-only)');
+    }
+
     // Check for proper files array
     if (!pkg.files || !Array.isArray(pkg.files)) {
       this.warnings.push('Consider adding "files" array to control published content');
@@ -941,6 +978,7 @@ class ReleaseValidator {
     try {
       const result = await runPackedTarballMcpSmoke();
       console.log(`  ✅ Installed ${result.filename} and ran ${result.binName}`);
+      console.log('  ✅ TypeScript resolved the installed root package import');
       console.log(`  ✅ initialize + tools/list returned tools: ${result.toolNames.join(', ')}`);
     } catch (error) {
       this.errors.push(`Packed tarball MCP smoke failed: ${error.message}`);

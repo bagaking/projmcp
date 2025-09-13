@@ -23,6 +23,10 @@ the local `project_plan/` directory under that working directory.
 - Workspace state: `<client cwd>/project_plan/`.
 - Protocol channel: JSON-RPC messages use stdout; application diagnostics use
   stderr.
+- Public package API: root package import metadata only. The supported runtime
+  surface is the MCP stdio server and `bagaking-projmcp` binary; `dist/...`
+  subpath imports are internal build output and are not a compatibility
+  contract.
 - Published package: the compiled `dist/` tree, `README.md`, `LICENSE`, and
   `CHANGELOG.md`. Source, tests, scripts, CI files, and local `project_plan/`
   files are release-validator exclusions.
@@ -204,7 +208,8 @@ stdout/stderr MCP boundary.
 `npm run release:dry-run` runs `scripts/validate-release.js` and then
 `npm publish --dry-run`. The release validator checks required files, package
 metadata, build output, ESLint, TypeScript compilation, smoke tests, entry
-points, npm package size, and the packed file manifest.
+points, root-only public exports, installed-package TypeScript resolution, npm
+package size, and the packed file manifest.
 
 ## Development
 
