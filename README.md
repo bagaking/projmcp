@@ -81,6 +81,8 @@ claim support for other clients beyond standard stdio MCP compatibility.
 
 ## JSON-RPC Smoke
 
+<!-- projmcp:json-rpc-smoke-tools ["list_files","show_current","show_plan","init_project_plan","record","query_sprint","right_now"] -->
+
 Use this when checking the compiled server or debugging client integration:
 
 ```bash

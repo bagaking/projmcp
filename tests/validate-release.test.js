@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import {
+  assertExactToolNames,
   collectToolNamesFromListResponse,
   EXPECTED_MCP_TOOL_NAMES,
   getReleaseEntryPoints,
@@ -33,7 +34,21 @@ const manifest = {
 test('release smoke expected tools match the README JSON-RPC smoke surface', () => {
   assert.deepEqual(
     EXPECTED_MCP_TOOL_NAMES,
-    getReadmeJsonRpcSmokeTools()
+    getReadmeJsonRpcSmokeToolMarker()
+  );
+});
+
+test('assertExactToolNames accepts only the exact expected tool set', () => {
+  assert.doesNotThrow(() => assertExactToolNames(EXPECTED_MCP_TOOL_NAMES));
+
+  assert.throws(
+    () => assertExactToolNames(EXPECTED_MCP_TOOL_NAMES.filter(name => name !== 'right_now')),
+    new RegExp('tools/list missing expected tools: right_now')
+  );
+
+  assert.throws(
+    () => assertExactToolNames([...EXPECTED_MCP_TOOL_NAMES, 'debug_tool']),
+    new RegExp('tools/list included unexpected tools: debug_tool')
   );
 });
 
@@ -380,6 +395,62 @@ function handleMessage(message) {
   );
 });
 
+test('runMcpJsonRpcSmoke rejects servers with unexpected release tools', async () => {
+  const fixtureDir = makeFixtureDir('jsonrpc-unexpected-release-tool-');
+  const serverPath = join(fixtureDir, 'server.mjs');
+
+  writeFileSync(serverPath, `
+let buffer = '';
+
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', chunk => {
+  buffer += chunk;
+  let newlineIndex = buffer.indexOf('\\n');
+
+  while (newlineIndex !== -1) {
+    const line = buffer.slice(0, newlineIndex);
+    buffer = buffer.slice(newlineIndex + 1);
+
+    if (line.length > 0) {
+      handleMessage(JSON.parse(line));
+    }
+
+    newlineIndex = buffer.indexOf('\\n');
+  }
+});
+
+function writeMessage(message) {
+  process.stdout.write(JSON.stringify(message) + '\\n');
+}
+
+function handleMessage(message) {
+  if (message.id === 1) {
+    writeMessage({ jsonrpc: '2.0', id: 1, result: { capabilities: {} } });
+    return;
+  }
+
+  if (message.id === 2 && message.method === 'tools/list') {
+    writeMessage({
+      jsonrpc: '2.0',
+      id: 2,
+      result: {
+        tools: ${toolListLiteral([...EXPECTED_MCP_TOOL_NAMES, 'debug_tool'])}
+      }
+    });
+  }
+}
+`);
+
+  await assert.rejects(
+    runMcpJsonRpcSmoke(process.execPath, {
+      args: [serverPath],
+      cwd: fixtureDir,
+      timeoutMs: 5000
+    }),
+    new RegExp('tools/list included unexpected tools: debug_tool')
+  );
+});
+
 test('runMcpJsonRpcSmoke rejects trailing stdout without a JSON-RPC newline', async () => {
   const fixtureDir = makeFixtureDir('jsonrpc-trailing-stdout-');
   const serverPath = join(fixtureDir, 'server.mjs');
@@ -468,15 +539,20 @@ function toolListLiteral(toolNames = EXPECTED_MCP_TOOL_NAMES) {
   return JSON.stringify(toolNames.map(name => ({ name })), null, 10);
 }
 
-function getReadmeJsonRpcSmokeTools() {
+function getReadmeJsonRpcSmokeToolMarker() {
   const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
-  const smokeSectionPattern = new RegExp('## JSON-RPC Smoke([\\s\\S]*?)(?:\\n## |\\n$)');
-  const toolListPattern = new RegExp('- the tool names include ([\\s\\S]*?)\\n-');
-  const toolNamePattern = new RegExp('`([^`]+)`', 'g');
-  const smokeSection = readme.match(smokeSectionPattern)?.[1] ?? '';
-  const toolListText = smokeSection.match(toolListPattern)?.[1] ?? '';
+  const markerPattern = new RegExp(
+    '<!--\\s*projmcp:json-rpc-smoke-tools\\s+(\\[[^\\n]*\\])\\s*-->'
+  );
+  const markerJson = readme.match(markerPattern)?.[1];
 
-  return [...toolListText.matchAll(toolNamePattern)].map(match => match[1]);
+  assert.ok(markerJson, 'README must include the projmcp:json-rpc-smoke-tools marker');
+  const toolNames = JSON.parse(markerJson);
+
+  assert.ok(Array.isArray(toolNames), 'README JSON-RPC smoke tools marker must be an array');
+  assert.ok(toolNames.every(name => typeof name === 'string'), 'README JSON-RPC smoke tools marker must contain only strings');
+
+  return toolNames;
 }
 
 function makeFixtureDir(prefix) {

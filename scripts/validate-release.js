@@ -301,6 +301,39 @@ export function collectToolNamesFromListResponse(message) {
   return tools.map(tool => tool?.name).filter(name => typeof name === 'string');
 }
 
+export function assertExactToolNames(toolNames, expectedToolNames = EXPECTED_MCP_TOOL_NAMES) {
+  const expectedToolNameSet = new Set(expectedToolNames);
+  const seenToolNameSet = new Set();
+  const duplicateToolNames = [];
+
+  for (const toolName of toolNames) {
+    if (seenToolNameSet.has(toolName) && !duplicateToolNames.includes(toolName)) {
+      duplicateToolNames.push(toolName);
+    }
+    seenToolNameSet.add(toolName);
+  }
+
+  const missingToolNames = expectedToolNames.filter(name => !seenToolNameSet.has(name));
+  const unexpectedToolNames = toolNames.filter(name => !expectedToolNameSet.has(name));
+  const errors = [];
+
+  if (missingToolNames.length > 0) {
+    errors.push(`tools/list missing expected tools: ${missingToolNames.join(', ')}`);
+  }
+
+  if (unexpectedToolNames.length > 0) {
+    errors.push(`tools/list included unexpected tools: ${unexpectedToolNames.join(', ')}`);
+  }
+
+  if (duplicateToolNames.length > 0) {
+    errors.push(`tools/list included duplicate tools: ${duplicateToolNames.join(', ')}`);
+  }
+
+  if (errors.length > 0) {
+    throw new Error(errors.join('; '));
+  }
+}
+
 export async function runMcpJsonRpcSmoke(command, options = {}) {
   const {
     args = [],
@@ -395,11 +428,7 @@ export async function runMcpJsonRpcSmoke(command, options = {}) {
       if (responses.has(1) && responses.has(2)) {
         try {
           const toolNames = collectToolNamesFromListResponse(responses.get(2));
-          const missingToolNames = expectedToolNames.filter(name => !toolNames.includes(name));
-
-          if (missingToolNames.length > 0) {
-            throw new Error(`tools/list missing expected tools: ${missingToolNames.join(', ')}`);
-          }
+          assertExactToolNames(toolNames, expectedToolNames);
 
           finish(null, { toolNames, stdout, stderr });
         } catch (error) {
