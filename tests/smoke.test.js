@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import { mkdtemp, rm, mkdir, symlink, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -17,6 +16,10 @@ import { ShowStatusTool } from '../dist/tools/show-status.js';
 import { FileManager } from '../dist/utils/file-manager.js';
 import { SecurityValidator, DEFAULT_SECURITY_CONFIG } from '../dist/utils/security-validator.js';
 import { TemplateGenerator } from '../dist/utils/template-generator.js';
+import {
+  EXPECTED_MCP_TOOL_NAMES,
+  runMcpJsonRpcSmoke
+} from '../scripts/validate-release.js';
 
 process.env.LOG_LEVEL = 'error';
 
@@ -396,61 +399,17 @@ test('server status reports the package.json version', () => {
   assert.equal(server.getStatus().version, packageJson.version);
 });
 
-test('stdio server startup does not write non-protocol logs to stdout', async () => {
+test('stdio server startup reserves stdout for JSON-RPC protocol messages', async () => {
   await withTempProject(async (baseDir) => {
-    const result = await runServerBriefly(baseDir);
+    const result = await runMcpJsonRpcSmoke(process.execPath, {
+      args: [builtEntryPoint],
+      cwd: baseDir,
+      timeoutMs: 5000
+    });
 
-    assert.equal(result.stdout, '');
-    assert.equal(result.stderr.includes('MCP Project Plan Server started successfully'), true);
+    assert.deepEqual(result.toolNames, EXPECTED_MCP_TOOL_NAMES);
   });
 });
-
-function runServerBriefly(cwd) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [builtEntryPoint], {
-      cwd,
-      env: {
-        ...process.env,
-        LOG_LEVEL: 'info'
-      },
-      stdio: ['ignore', 'pipe', 'pipe']
-    });
-
-    let stdout = '';
-    let stderr = '';
-    let settled = false;
-
-    const timeout = setTimeout(() => {
-      child.kill('SIGTERM');
-    }, 500);
-
-    child.stdout.setEncoding('utf8');
-    child.stderr.setEncoding('utf8');
-    child.stdout.on('data', (chunk) => {
-      stdout += chunk;
-    });
-    child.stderr.on('data', (chunk) => {
-      stderr += chunk;
-      if (stderr.includes('MCP Project Plan Server started successfully')) {
-        child.kill('SIGTERM');
-      }
-    });
-    child.on('error', (error) => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timeout);
-        reject(error);
-      }
-    });
-    child.on('close', () => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timeout);
-        resolve({ stdout, stderr });
-      }
-    });
-  });
-}
 
 function throwsMessage(fn) {
   try {

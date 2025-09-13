@@ -50,6 +50,11 @@ test('assertExactToolNames accepts only the exact expected tool set', () => {
     () => assertExactToolNames([...EXPECTED_MCP_TOOL_NAMES, 'debug_tool']),
     new RegExp('tools/list included unexpected tools: debug_tool')
   );
+
+  assert.throws(
+    () => assertExactToolNames([...EXPECTED_MCP_TOOL_NAMES, 'right_now']),
+    new RegExp('tools/list included duplicate tools: right_now')
+  );
 });
 
 test('parsePackageManifest parses pure npm pack JSON output', () => {
