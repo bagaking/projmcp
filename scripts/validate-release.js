@@ -397,34 +397,61 @@ function validateInputSchemaShape(tool, toolName) {
 
 function validateListFilesSchema(tool) {
   const typeSchema = tool?.inputSchema?.properties?.type;
-  if (!typeSchema || typeof typeSchema !== 'object' || Array.isArray(typeSchema)) {
-    throw new Error('tools/list tool list_files must define a type property schema');
-  }
-
-  if (!Array.isArray(typeSchema.enum) || typeSchema.enum.length === 0) {
-    throw new Error('tools/list tool list_files type property must define an enum');
-  }
+  validateStringPropertySchema('list_files', 'type', typeSchema);
+  validateEnumIncludes('list_files', 'type', typeSchema, ['all', 'sprint', 'doc', 'code', 'opinion']);
 }
 
 function validateRecordSchema(tool) {
   const required = tool?.inputSchema?.required;
-  const requiredSet = new Set(required);
+  validateRequiredIncludes('record', required, ['type', 'target', 'content']);
 
-  for (const fieldName of ['type', 'target', 'content']) {
-    if (!requiredSet.has(fieldName)) {
-      throw new Error(`tools/list tool record required must include ${fieldName}`);
-    }
-  }
+  const properties = tool?.inputSchema?.properties ?? {};
+  validateStringPropertySchema('record', 'type', properties.type);
+  validateEnumIncludes('record', 'type', properties.type, ['doc', 'code', 'opinion']);
+  validateStringPropertySchema('record', 'target', properties.target);
+  validateStringPropertySchema('record', 'content', properties.content);
 }
 
 function validateQuerySprintSchema(tool) {
   const sprintIdSchema = tool?.inputSchema?.properties?.sprintId;
-  if (!sprintIdSchema || typeof sprintIdSchema !== 'object' || Array.isArray(sprintIdSchema)) {
-    throw new Error('tools/list tool query_sprint must define a sprintId property schema');
-  }
+  validateRequiredIncludes('query_sprint', tool?.inputSchema?.required, ['sprintId']);
+  validateStringPropertySchema('query_sprint', 'sprintId', sprintIdSchema);
 
   if (typeof sprintIdSchema.pattern !== 'string' || sprintIdSchema.pattern.length === 0) {
     throw new Error('tools/list tool query_sprint sprintId property must define a pattern');
+  }
+}
+
+function validateRequiredIncludes(toolName, required, fieldNames) {
+  const requiredSet = new Set(required);
+
+  for (const fieldName of fieldNames) {
+    if (!requiredSet.has(fieldName)) {
+      throw new Error(`tools/list tool ${toolName} required must include ${fieldName}`);
+    }
+  }
+}
+
+function validateStringPropertySchema(toolName, propertyName, propertySchema) {
+  if (!propertySchema || typeof propertySchema !== 'object' || Array.isArray(propertySchema)) {
+    throw new Error(`tools/list tool ${toolName} must define a ${propertyName} property schema`);
+  }
+
+  if (propertySchema.type !== 'string') {
+    throw new Error(`tools/list tool ${toolName} ${propertyName} property type must be string`);
+  }
+}
+
+function validateEnumIncludes(toolName, propertyName, propertySchema, expectedValues) {
+  if (!Array.isArray(propertySchema.enum)) {
+    throw new Error(`tools/list tool ${toolName} ${propertyName} property must define an enum`);
+  }
+
+  const missingValues = expectedValues.filter(value => !propertySchema.enum.includes(value));
+  if (missingValues.length > 0) {
+    throw new Error(
+      `tools/list tool ${toolName} ${propertyName} property enum must include ${missingValues.join(', ')}`
+    );
   }
 }
 

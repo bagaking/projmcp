@@ -323,48 +323,167 @@ test('validateToolListContract rejects malformed stable schema fields', () => {
 
 test('validateToolListContract rejects missing minimum release schema boundaries', () => {
   assert.throws(
-    () => validateToolListContract([
-      ...releaseToolFixtures().filter(tool => tool.name !== 'list_files'),
-      {
-        ...toolFixture('list_files'),
-        inputSchema: {
-          ...toolFixture('list_files').inputSchema,
-          properties: {
-            type: { type: 'string' }
-          }
+    () => validateToolListContract(releaseToolFixturesWith('list_files', {
+      inputSchema: {
+        ...toolFixture('list_files').inputSchema,
+        properties: {}
+      }
+    })),
+    new RegExp('list_files must define a type property schema')
+  );
+
+  assert.throws(
+    () => validateToolListContract(releaseToolFixturesWith('list_files', {
+      inputSchema: {
+        ...toolFixture('list_files').inputSchema,
+        properties: {
+          type: { type: 'number', enum: ['all', 'sprint', 'doc', 'code', 'opinion'] }
         }
       }
-    ]),
+    })),
+    new RegExp('list_files type property type must be string')
+  );
+
+  assert.throws(
+    () => validateToolListContract(releaseToolFixturesWith('list_files', {
+      inputSchema: {
+        ...toolFixture('list_files').inputSchema,
+        properties: {
+          type: { type: 'string' }
+        }
+      }
+    })),
     new RegExp('list_files type property must define an enum')
   );
 
   assert.throws(
-    () => validateToolListContract([
-      ...releaseToolFixtures().filter(tool => tool.name !== 'record'),
-      {
-        ...toolFixture('record'),
-        inputSchema: {
-          ...toolFixture('record').inputSchema,
-          required: ['type', 'target']
+    () => validateToolListContract(releaseToolFixturesWith('list_files', {
+      inputSchema: {
+        ...toolFixture('list_files').inputSchema,
+        properties: {
+          type: { type: 'string', enum: ['all', 'sprint', 'doc', 'code'] }
         }
       }
-    ]),
+    })),
+    new RegExp('list_files type property enum must include opinion')
+  );
+
+  assert.throws(
+    () => validateToolListContract(releaseToolFixturesWith('record', {
+      inputSchema: {
+        ...toolFixture('record').inputSchema,
+        required: ['type', 'target']
+      }
+    })),
     new RegExp('record required must include content')
   );
 
   assert.throws(
-    () => validateToolListContract([
-      ...releaseToolFixtures().filter(tool => tool.name !== 'query_sprint'),
-      {
-        ...toolFixture('query_sprint'),
-        inputSchema: {
-          ...toolFixture('query_sprint').inputSchema,
-          properties: {
-            sprintId: { type: 'string' }
-          }
+    () => validateToolListContract(releaseToolFixturesWith('record', {
+      inputSchema: {
+        ...toolFixture('record').inputSchema,
+        properties: {
+          target: { type: 'string' },
+          content: { type: 'string' }
         }
       }
-    ]),
+    })),
+    new RegExp('record must define a type property schema')
+  );
+
+  assert.throws(
+    () => validateToolListContract(releaseToolFixturesWith('record', {
+      inputSchema: {
+        ...toolFixture('record').inputSchema,
+        properties: {
+          ...toolFixture('record').inputSchema.properties,
+          type: { type: 'number', enum: ['doc', 'code', 'opinion'] }
+        }
+      }
+    })),
+    new RegExp('record type property type must be string')
+  );
+
+  assert.throws(
+    () => validateToolListContract(releaseToolFixturesWith('record', {
+      inputSchema: {
+        ...toolFixture('record').inputSchema,
+        properties: {
+          ...toolFixture('record').inputSchema.properties,
+          type: { type: 'string', enum: ['doc', 'code'] }
+        }
+      }
+    })),
+    new RegExp('record type property enum must include opinion')
+  );
+
+  assert.throws(
+    () => validateToolListContract(releaseToolFixturesWith('record', {
+      inputSchema: {
+        ...toolFixture('record').inputSchema,
+        properties: {
+          ...toolFixture('record').inputSchema.properties,
+          target: { type: 'number' }
+        }
+      }
+    })),
+    new RegExp('record target property type must be string')
+  );
+
+  assert.throws(
+    () => validateToolListContract(releaseToolFixturesWith('record', {
+      inputSchema: {
+        ...toolFixture('record').inputSchema,
+        properties: {
+          ...toolFixture('record').inputSchema.properties,
+          content: { type: 'number' }
+        }
+      }
+    })),
+    new RegExp('record content property type must be string')
+  );
+
+  assert.throws(
+    () => validateToolListContract(releaseToolFixturesWith('query_sprint', {
+      inputSchema: {
+        ...toolFixture('query_sprint').inputSchema,
+        required: []
+      }
+    })),
+    new RegExp('query_sprint required must include sprintId')
+  );
+
+  assert.throws(
+    () => validateToolListContract(releaseToolFixturesWith('query_sprint', {
+      inputSchema: {
+        ...toolFixture('query_sprint').inputSchema,
+        properties: {}
+      }
+    })),
+    new RegExp('query_sprint must define a sprintId property schema')
+  );
+
+  assert.throws(
+    () => validateToolListContract(releaseToolFixturesWith('query_sprint', {
+      inputSchema: {
+        ...toolFixture('query_sprint').inputSchema,
+        properties: {
+          sprintId: { type: 'number', pattern: '^M\\d{2}_S\\d{2}$' }
+        }
+      }
+    })),
+    new RegExp('query_sprint sprintId property type must be string')
+  );
+
+  assert.throws(
+    () => validateToolListContract(releaseToolFixturesWith('query_sprint', {
+      inputSchema: {
+        ...toolFixture('query_sprint').inputSchema,
+        properties: {
+          sprintId: { type: 'string' }
+        }
+      }
+    })),
     new RegExp('query_sprint sprintId property must define a pattern')
   );
 
@@ -653,6 +772,17 @@ function toolListLiteral(toolNames = EXPECTED_MCP_TOOL_NAMES) {
 
 function releaseToolFixtures() {
   return EXPECTED_MCP_TOOL_NAMES.map(name => toolFixture(name));
+}
+
+function releaseToolFixturesWith(name, overrides) {
+  return releaseToolFixtures().map(tool => (
+    tool.name === name
+      ? {
+          ...tool,
+          ...overrides
+        }
+      : tool
+  ));
 }
 
 function toolFixture(name) {
