@@ -7,13 +7,15 @@ import test from 'node:test';
 import {
   assertExactToolNames,
   collectToolNamesFromListResponse,
+  collectToolsFromListResponse,
   EXPECTED_MCP_TOOL_NAMES,
   getReleaseEntryPoints,
   parsePackageManifest,
   parseJsonRpcStdoutLine,
   runMcpJsonRpcSmoke,
   selectPackageBinName,
-  validateEntryPointFile
+  validateEntryPointFile,
+  validateToolListContract
 } from '../scripts/validate-release.js';
 
 const manifest = {
@@ -246,12 +248,25 @@ test('collectToolNamesFromListResponse extracts tool names', () => {
       id: 2,
       result: {
         tools: [
-          { name: 'list_files' },
-          { name: 'init_project_plan' }
+          toolFixture('list_files'),
+          toolFixture('init_project_plan')
         ]
       }
     }),
     ['list_files', 'init_project_plan']
+  );
+});
+
+test('collectToolsFromListResponse preserves full tool contracts', () => {
+  const tools = [toolFixture('list_files'), toolFixture('record')];
+
+  assert.deepEqual(
+    collectToolsFromListResponse({
+      jsonrpc: '2.0',
+      id: 2,
+      result: { tools }
+    }),
+    tools
   );
 });
 
@@ -275,6 +290,98 @@ test('collectToolNamesFromListResponse rejects error or malformed responses', ()
       result: {}
     }),
     new RegExp('tools array')
+  );
+});
+
+test('validateToolListContract accepts the expected release tool schemas', () => {
+  assert.doesNotThrow(() => validateToolListContract(releaseToolFixtures()));
+});
+
+test('validateToolListContract rejects malformed stable schema fields', () => {
+  assert.throws(
+    () => validateToolListContract([
+      ...releaseToolFixtures().filter(tool => tool.name !== 'list_files'),
+      { name: 'list_files', inputSchema: { type: 'string', properties: {} } }
+    ]),
+    new RegExp('list_files inputSchema.type must be object')
+  );
+
+  assert.throws(
+    () => validateToolListContract([
+      ...releaseToolFixtures().filter(tool => tool.name !== 'record'),
+      {
+        ...toolFixture('record'),
+        inputSchema: {
+          ...toolFixture('record').inputSchema,
+          required: ['type', 42]
+        }
+      }
+    ]),
+    new RegExp('record inputSchema.required must be a string array')
+  );
+});
+
+test('validateToolListContract rejects missing minimum release schema boundaries', () => {
+  assert.throws(
+    () => validateToolListContract([
+      ...releaseToolFixtures().filter(tool => tool.name !== 'list_files'),
+      {
+        ...toolFixture('list_files'),
+        inputSchema: {
+          ...toolFixture('list_files').inputSchema,
+          properties: {
+            type: { type: 'string' }
+          }
+        }
+      }
+    ]),
+    new RegExp('list_files type property must define an enum')
+  );
+
+  assert.throws(
+    () => validateToolListContract([
+      ...releaseToolFixtures().filter(tool => tool.name !== 'record'),
+      {
+        ...toolFixture('record'),
+        inputSchema: {
+          ...toolFixture('record').inputSchema,
+          required: ['type', 'target']
+        }
+      }
+    ]),
+    new RegExp('record required must include content')
+  );
+
+  assert.throws(
+    () => validateToolListContract([
+      ...releaseToolFixtures().filter(tool => tool.name !== 'query_sprint'),
+      {
+        ...toolFixture('query_sprint'),
+        inputSchema: {
+          ...toolFixture('query_sprint').inputSchema,
+          properties: {
+            sprintId: { type: 'string' }
+          }
+        }
+      }
+    ]),
+    new RegExp('query_sprint sprintId property must define a pattern')
+  );
+
+  assert.throws(
+    () => validateToolListContract([
+      ...releaseToolFixtures().filter(tool => tool.name !== 'right_now'),
+      {
+        ...toolFixture('right_now'),
+        inputSchema: {
+          type: 'object',
+          properties: {
+            timezone: { type: 'string' }
+          }
+        }
+      }
+    ]),
+    new RegExp('right_now inputSchema.properties must be empty')
   );
 });
 
@@ -541,7 +648,76 @@ test('selectPackageBinName rejects packages without bin entries', () => {
 });
 
 function toolListLiteral(toolNames = EXPECTED_MCP_TOOL_NAMES) {
-  return JSON.stringify(toolNames.map(name => ({ name })), null, 10);
+  return JSON.stringify(toolNames.map(name => toolFixture(name)), null, 10);
+}
+
+function releaseToolFixtures() {
+  return EXPECTED_MCP_TOOL_NAMES.map(name => toolFixture(name));
+}
+
+function toolFixture(name) {
+  const base = {
+    name,
+    inputSchema: {
+      type: 'object',
+      properties: {}
+    }
+  };
+
+  if (name === 'list_files') {
+    return {
+      ...base,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          type: {
+            type: 'string',
+            enum: ['all', 'sprint', 'doc', 'code', 'opinion']
+          }
+        }
+      }
+    };
+  }
+
+  if (name === 'record') {
+    return {
+      ...base,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          type: {
+            type: 'string',
+            enum: ['doc', 'code', 'opinion']
+          },
+          target: {
+            type: 'string'
+          },
+          content: {
+            type: 'string'
+          }
+        },
+        required: ['type', 'target', 'content']
+      }
+    };
+  }
+
+  if (name === 'query_sprint') {
+    return {
+      ...base,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          sprintId: {
+            type: 'string',
+            pattern: '^M\\d{2}_S\\d{2}$'
+          }
+        },
+        required: ['sprintId']
+      }
+    };
+  }
+
+  return base;
 }
 
 function getReadmeJsonRpcSmokeToolMarker() {

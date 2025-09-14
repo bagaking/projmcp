@@ -101,6 +101,7 @@ Expected result:
 - stdout contains MCP JSON-RPC responses, including a `tools/list` response.
 - the tool names include `list_files`, `show_current`, `show_plan`,
   `init_project_plan`, `record`, `query_sprint`, and `right_now`.
+- the release validator also checks tool input schema boundaries.
 - stderr may contain startup diagnostics.
 - stdout must not contain human-readable application logs outside JSON-RPC
   messages.

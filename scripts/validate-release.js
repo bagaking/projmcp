@@ -289,6 +289,10 @@ export function parseJsonRpcStdoutLine(line) {
 }
 
 export function collectToolNamesFromListResponse(message) {
+  return collectToolsFromListResponse(message).map(tool => tool.name);
+}
+
+export function collectToolsFromListResponse(message) {
   if (!message || typeof message !== 'object' || message.error) {
     throw new Error(`tools/list returned an error: ${JSON.stringify(message?.error ?? message)}`);
   }
@@ -298,7 +302,7 @@ export function collectToolNamesFromListResponse(message) {
     throw new Error('tools/list response did not include a tools array');
   }
 
-  return tools.map(tool => tool?.name).filter(name => typeof name === 'string');
+  return tools;
 }
 
 export function assertExactToolNames(toolNames, expectedToolNames = EXPECTED_MCP_TOOL_NAMES) {
@@ -331,6 +335,102 @@ export function assertExactToolNames(toolNames, expectedToolNames = EXPECTED_MCP
 
   if (errors.length > 0) {
     throw new Error(errors.join('; '));
+  }
+}
+
+export function validateToolListContract(tools, expectedToolNames = EXPECTED_MCP_TOOL_NAMES) {
+  if (!Array.isArray(tools)) {
+    throw new Error('tools/list response did not include a tools array');
+  }
+
+  const toolNames = tools.map((tool, index) => {
+    validateStableToolFields(tool, index);
+    return tool.name;
+  });
+
+  assertExactToolNames(toolNames, expectedToolNames);
+
+  const toolsByName = new Map(tools.map(tool => [tool.name, tool]));
+  validateListFilesSchema(toolsByName.get('list_files'));
+  validateRecordSchema(toolsByName.get('record'));
+  validateQuerySprintSchema(toolsByName.get('query_sprint'));
+
+  for (const toolName of ['show_current', 'show_plan', 'init_project_plan', 'right_now']) {
+    validateNoArgToolSchema(toolsByName.get(toolName), toolName);
+  }
+}
+
+function validateStableToolFields(tool, index) {
+  if (!tool || typeof tool !== 'object' || Array.isArray(tool)) {
+    throw new Error(`tools/list tool at index ${index} is not an object`);
+  }
+
+  if (typeof tool.name !== 'string' || tool.name.length === 0) {
+    throw new Error(`tools/list tool at index ${index} has an invalid name`);
+  }
+
+  validateInputSchemaShape(tool, tool.name);
+}
+
+function validateInputSchemaShape(tool, toolName) {
+  const schema = tool.inputSchema;
+
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
+    throw new Error(`tools/list tool ${toolName} inputSchema must be an object`);
+  }
+
+  if (schema.type !== 'object') {
+    throw new Error(`tools/list tool ${toolName} inputSchema.type must be object`);
+  }
+
+  if (!schema.properties || typeof schema.properties !== 'object' || Array.isArray(schema.properties)) {
+    throw new Error(`tools/list tool ${toolName} inputSchema.properties must be an object`);
+  }
+
+  if (
+    schema.required !== undefined &&
+    (!Array.isArray(schema.required) || !schema.required.every(item => typeof item === 'string'))
+  ) {
+    throw new Error(`tools/list tool ${toolName} inputSchema.required must be a string array when present`);
+  }
+}
+
+function validateListFilesSchema(tool) {
+  const typeSchema = tool?.inputSchema?.properties?.type;
+  if (!typeSchema || typeof typeSchema !== 'object' || Array.isArray(typeSchema)) {
+    throw new Error('tools/list tool list_files must define a type property schema');
+  }
+
+  if (!Array.isArray(typeSchema.enum) || typeSchema.enum.length === 0) {
+    throw new Error('tools/list tool list_files type property must define an enum');
+  }
+}
+
+function validateRecordSchema(tool) {
+  const required = tool?.inputSchema?.required;
+  const requiredSet = new Set(required);
+
+  for (const fieldName of ['type', 'target', 'content']) {
+    if (!requiredSet.has(fieldName)) {
+      throw new Error(`tools/list tool record required must include ${fieldName}`);
+    }
+  }
+}
+
+function validateQuerySprintSchema(tool) {
+  const sprintIdSchema = tool?.inputSchema?.properties?.sprintId;
+  if (!sprintIdSchema || typeof sprintIdSchema !== 'object' || Array.isArray(sprintIdSchema)) {
+    throw new Error('tools/list tool query_sprint must define a sprintId property schema');
+  }
+
+  if (typeof sprintIdSchema.pattern !== 'string' || sprintIdSchema.pattern.length === 0) {
+    throw new Error('tools/list tool query_sprint sprintId property must define a pattern');
+  }
+}
+
+function validateNoArgToolSchema(tool, toolName) {
+  if (Object.keys(tool?.inputSchema?.properties ?? {}).length !== 0) {
+    throw new Error(`tools/list tool ${toolName} inputSchema.properties must be empty`);
   }
 }
 
@@ -427,8 +527,9 @@ export async function runMcpJsonRpcSmoke(command, options = {}) {
 
       if (responses.has(1) && responses.has(2)) {
         try {
-          const toolNames = collectToolNamesFromListResponse(responses.get(2));
-          assertExactToolNames(toolNames, expectedToolNames);
+          const tools = collectToolsFromListResponse(responses.get(2));
+          validateToolListContract(tools, expectedToolNames);
+          const toolNames = tools.map(tool => tool.name);
 
           finish(null, { toolNames, stdout, stderr });
         } catch (error) {
